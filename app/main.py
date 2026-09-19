@@ -1,5 +1,6 @@
 """Car's Secrets API: accounts and read-only vehicle auction data for the web app."""
 
+import logging
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from typing import Annotated
@@ -58,4 +59,6 @@ def create_app(settings: Settings | None = None, *, mailer: Mailer | None = None
 
 
 def app_factory() -> FastAPI:  # uvicorn --factory entrypoint
+    # uvicorn only configures its own loggers; without this the log mailer's links are lost.
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     return create_app()
