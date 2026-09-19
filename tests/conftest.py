@@ -12,8 +12,10 @@ from typing import Any
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from psycopg.rows import dict_row
 
 from app.config import Settings
+from app.db import run_migrations
 from app.main import create_app
 
 SCHEMA = Path(__file__).parent / "schema.sql"
@@ -33,10 +35,13 @@ def db_url() -> Iterator[str]:
 
 @pytest.fixture
 def conn(db_url: str) -> Iterator[psycopg.Connection]:
-    """An empty, freshly created `lots` table for every test."""
-    with psycopg.connect(db_url, autocommit=True) as c:
-        c.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public")
+    """A fresh database for every test: the ingest `lots` table from schema.sql and this
+    repo's `app` schema from its migrations."""
+    with psycopg.connect(db_url, autocommit=True, row_factory=dict_row) as c:
+        c.execute("DROP SCHEMA IF EXISTS app CASCADE; DROP SCHEMA public CASCADE; "
+                  "CREATE SCHEMA public")
         c.execute(SCHEMA.read_text())
+        run_migrations(db_url)
         yield c
 
 

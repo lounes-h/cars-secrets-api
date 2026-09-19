@@ -5,7 +5,8 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /srv
-COPY pyproject.toml ./
+COPY pyproject.toml alembic.ini ./
+COPY migrations migrations
 COPY app app
 RUN pip install .
 
