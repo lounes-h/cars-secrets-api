@@ -52,6 +52,12 @@ def test_smtp_mailer_sends_a_plain_text_message(monkeypatch):
     assert message["Subject"] == "Hi" and message.get_content().strip() == "Body"
 
 
+def test_log_mailer_warns_that_links_end_up_in_the_log(caplog):
+    with caplog.at_level(logging.WARNING, logger="app.mail"):
+        mail.make_mailer(Settings(_env_file=None, database_url="x"))
+    assert "SMTP_HOST is not set" in caplog.text
+
+
 def test_make_mailer_picks_smtp_only_when_configured():
     assert isinstance(mail.make_mailer(Settings(_env_file=None, database_url="x")), mail.LogMailer)
     assert isinstance(mail.make_mailer(Settings(_env_file=None, database_url="x", smtp_host="h")),

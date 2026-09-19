@@ -36,7 +36,12 @@ class SmtpMailer:
 
 
 def make_mailer(settings: Settings) -> Mailer:
-    return SmtpMailer(settings) if settings.smtp_host else LogMailer()
+    if settings.smtp_host:
+        return SmtpMailer(settings)
+    # The log then holds working verification and password-reset links: development only.
+    log.warning("SMTP_HOST is not set: emails, including password reset links, are written to "
+                "the log. Never run like this in production.")
+    return LogMailer()
 
 
 def verification_mail(web_url: str, token: str) -> tuple[str, str]:
