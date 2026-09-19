@@ -1,30 +1,39 @@
-"""Car's Secrets API: read-only vehicle auction data for the web app."""
+"""Car's Secrets API: accounts and read-only vehicle auction data for the web app."""
 
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from typing import Annotated
 
+import httpx
 import psycopg
 from fastapi import APIRouter, Depends, FastAPI
 
-from . import lots
+from . import auth, lots
 from .config import Settings, get_settings
 from .db import make_pool
+from .mail import Mailer, make_mailer
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, mailer: Mailer | None = None,
+               http: httpx.Client | None = None) -> FastAPI:
     settings = settings or get_settings()
-    pool = make_pool(settings.database_url)
+    pool = make_pool(settings.database_url)                     # ingest tables, read-only
+    rw_pool = make_pool(settings.database_url, read_only=False)  # the `app` schema
+    http = http or httpx.Client()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         pool.open()
+        rw_pool.open()
         yield
+        rw_pool.close()
         pool.close()
+        http.close()
 
     app = FastAPI(title="Car's Secrets API", lifespan=lifespan, docs_url="/api/docs",
                   openapi_url="/api/openapi.json")
-    app.state.pool = pool
+    app.state.settings, app.state.pool, app.state.rw_pool = settings, pool, rw_pool
+    app.state.mailer, app.state.http = mailer or make_mailer(settings), http
 
     def db() -> Iterator[psycopg.Connection]:
         with pool.connection() as conn:
@@ -33,8 +42,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     Conn = Annotated[psycopg.Connection, Depends(db)]
 
     public = APIRouter(prefix="/api")
-    # Everything that will need a signed-in dealer goes here; auth is added as a dependency
-    # of this router, never per route.
+    # Routes for signed-in dealers take `auth.User`; `/api/lots` stays public for now.
     api = APIRouter(prefix="/api")
 
     @public.get("/health")
@@ -42,6 +50,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         conn.execute("SELECT 1")
         return {"status": "ok"}
 
+    public.include_router(auth.router)
     api.include_router(lots.router(Conn))
     app.include_router(public)
     app.include_router(api)

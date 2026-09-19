@@ -9,6 +9,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
@@ -45,9 +46,48 @@ def conn(db_url: str) -> Iterator[psycopg.Connection]:
         yield c
 
 
+class FakeMailer:
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str, str]] = []
+
+    def send(self, to: str, subject: str, body: str) -> None:
+        self.sent.append((to, subject, body))
+
+    def last_link(self, path: str) -> str:
+        """The token in the last mail's link for `path`, e.g. '/verify-email'."""
+        body = self.sent[-1][2]
+        start = body.index(f"{path}?token=") + len(f"{path}?token=")
+        return body[start:].split()[0]
+
+
 @pytest.fixture
-def client(conn: psycopg.Connection, db_url: str) -> Iterator[TestClient]:
-    app = create_app(Settings(_env_file=None, database_url=db_url))
+def settings(db_url: str) -> Settings:
+    return Settings(
+        _env_file=None, database_url=db_url, web_url="https://web.test",
+        internal_api_key="k" * 32, check_breached_passwords=False,
+    )
+
+
+@pytest.fixture
+def mailer() -> FakeMailer:
+    return FakeMailer()
+
+
+@pytest.fixture
+def http_handler():
+    """Tests replace `handler.fn` to script outbound HTTP (Turnstile, HIBP, OAuth)."""
+    class Handler:
+        fn = staticmethod(lambda request: httpx.Response(500))
+
+        def __call__(self, request: httpx.Request) -> httpx.Response:
+            return self.fn(request)
+    return Handler()
+
+
+@pytest.fixture
+def client(conn, settings, mailer, http_handler) -> Iterator[TestClient]:
+    http = httpx.Client(transport=httpx.MockTransport(http_handler))
+    app = create_app(settings, mailer=mailer, http=http)
     with TestClient(app) as tc:
         yield tc
 
