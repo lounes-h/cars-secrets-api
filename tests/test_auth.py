@@ -123,25 +123,47 @@ def test_captcha_required_on_register_when_configured(client, settings, http_han
 
 
 def test_login_failures_require_a_captcha(client, mailer, settings, http_handler):
-    verified_user(client, mailer)
+    settings.turnstile_secret = "sec"
+    http_handler.fn = lambda r: httpx.Response(200, json={"success": False})
+    verified_user_with_captcha(client, mailer, http_handler)
+    http_handler.fn = lambda r: httpx.Response(200, json={"success": False})
     for _ in range(3):
         r = login(client, password="wrong-password")
         assert r.status_code == 401 and r.json()["detail"]["code"] == "invalid_credentials"
     r = login(client)   # right password, but throttled
     assert r.status_code == 429 and r.json()["detail"]["code"] == "captcha_required"
-    settings.turnstile_secret = "sec"
+    assert login(client, captcha_token="bad").status_code == 429
     http_handler.fn = lambda r: httpx.Response(200, json={"success": True})
     assert login(client, captcha_token="tok").status_code == 200
 
 
-def test_login_throttles_per_client_ip(client, mailer):
+def test_throttle_does_not_lock_out_when_no_captcha_is_configured(client, mailer):
+    # Regression: with TURNSTILE_SECRET empty the form shows no captcha, yet after three
+    # failures the API answered 429 captcha_required for the whole 15-minute window.
     verified_user(client, mailer)
+    for _ in range(3):
+        assert login(client, password="wrong-password").status_code == 401
+    assert login(client).status_code == 200
+
+
+def verified_user_with_captcha(client, mailer, http_handler):
+    http_handler.fn = lambda r: httpx.Response(200, json={"success": True})
+    assert register(client, captcha_token="tok").status_code == 200
+    token = mailer.last_link("/verify-email")
+    assert client.post("/api/auth/verify-email", json={"token": token}).status_code == 200
+
+
+def test_login_throttles_per_client_ip(client, mailer, settings, http_handler):
+    verified_user(client, mailer)
+    settings.turnstile_secret = "sec"
+    http_handler.fn = lambda r: httpx.Response(200, json={"success": False})
     for n in range(10):
         client.post("/api/auth/login", headers=INTERNAL,
                     json={"email": f"nobody{n}@example.com", "password": "wrong-password"})
     r = client.post("/api/auth/login", headers=INTERNAL,
                     json={"email": "dana@example.com", "password": "long-enough-pw"})
     assert r.status_code == 429
+    settings.turnstile_secret = ""   # the remaining check is about which address is counted
     # Without the internal key the IP header is ignored, so the peer address is not throttled.
     r = client.post("/api/auth/login", headers={"X-Client-IP": "9.9.9.9"},
                     json={"email": "dana@example.com", "password": "long-enough-pw"})

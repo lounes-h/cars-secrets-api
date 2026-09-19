@@ -29,7 +29,8 @@ five characters of its SHA-1 leave the server, and a network failure lets the pa
 Failed logins are counted per email (3) and per client IP (10) over 15 minutes in
 `app.throttle`; past a limit the login needs a valid Cloudflare Turnstile token
 (`429 captcha_required`). Register, resend-verification and forgot-password always require a
-captcha token when `TURNSTILE_SECRET` is set. Without it, nothing is enforced: set it in
+captcha token when `TURNSTILE_SECRET` is set. Without it, nothing is enforced, and failed
+logins are still counted but never block (there would be no captcha to solve): set it in
 production.
 
 The client IP is `X-Client-IP` only when the request also carries `X-Internal-Key` equal to
