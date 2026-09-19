@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     # X-Client-IP for rate limiting. Empty: the header is ignored.
     internal_api_key: str = Field(default="", repr=False)
 
+    # Development only: let unconfirmed accounts sign in. Never enable in production.
+    skip_email_verification: bool = False
+
     session_remember_seconds: int = 30 * 24 * 3600
     session_idle_seconds: int = 12 * 3600
     verify_token_seconds: int = 24 * 3600

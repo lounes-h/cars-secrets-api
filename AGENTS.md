@@ -144,7 +144,8 @@ Working: read-only lots (`/api/lots`), accounts (register with terms acceptance 
 E.164 phone, email verification, login with remember-me and captcha after repeated failures,
 logout, me, forgot / reset password), Google and Apple sign-in (built and tested with fakes;
 they need credentials in `.env` to be offered). Mail goes to the log until `SMTP_*` is set;
-the captcha is enforced only with `TURNSTILE_SECRET`. The only provider in the lot data is
+the captcha is enforced only with `TURNSTILE_SECRET`; `SKIP_EMAIL_VERIFICATION=true`
+lets unconfirmed accounts sign in during development (off by default). The only provider in the lot data is
 Copart.
 
 Not done: terms of use and privacy policy documents, profile editing, email change, account

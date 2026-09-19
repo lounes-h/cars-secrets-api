@@ -59,7 +59,7 @@ escaped. Results are ordered `sale_at ASC NULLS LAST, lot_number`.
 - **Register** → user row (unverified) + `verify_email` token → mail with
   `WEB_URL/verify-email?token=…`. An existing address gets an "account exists" mail instead,
   and the response is identical. **Verify** consumes the token. Login refuses unverified
-  accounts with `403 email_unverified`; **resend-verification** issues a new token.
+  accounts with `403 email_unverified` (unless `SKIP_EMAIL_VERIFICATION=true`, development only); **resend-verification** issues a new token.
 - **Login** counts failures per email and per client IP; past the limits it demands a
   Turnstile token (`429 captcha_required`). Success returns a session token; the web server
   stores it in a cookie and sends it back as a bearer. `remember` picks a 30-day session

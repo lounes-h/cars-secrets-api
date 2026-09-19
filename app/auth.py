@@ -195,7 +195,7 @@ def login(body: LoginIn, request: Request, conn: RwConn) -> dict[str, Any]:
         for k in keys:
             accounts.throttle_hit(conn, k)
         raise error(401, "invalid_credentials", "Incorrect email or password.")
-    if user["email_verified_at"] is None:
+    if user["email_verified_at"] is None and not s.skip_email_verification:
         raise error(403, "email_unverified", "Confirm your email address before signing in.")
     return issue_session(request, conn, user["id"], remember=body.remember)
 

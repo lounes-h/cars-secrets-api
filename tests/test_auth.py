@@ -62,6 +62,26 @@ def test_register_verify_login_me(client, mailer, conn):
     assert client.get("/api/auth/me", headers={"Authorization": "Bearer nope"}).status_code == 401
 
 
+def test_development_setting_lets_unverified_accounts_sign_in(client, mailer, settings, caplog):
+    register(client)
+    settings.skip_email_verification = True
+    r = login(client)
+    assert r.status_code == 200
+    me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {r.json()['token']}"})
+    assert me.json()["email_verified"] is False   # still unverified, only not enforced
+    assert login(client, password="wrong-password").status_code == 401
+
+
+def test_skipping_verification_is_logged_at_startup(settings, caplog):
+    import logging
+
+    from app.main import create_app
+    settings.skip_email_verification = True
+    with caplog.at_level(logging.WARNING, logger="app.main"):
+        create_app(settings)
+    assert "SKIP_EMAIL_VERIFICATION is on" in caplog.text
+
+
 def test_register_existing_email_sends_a_hint_instead(client, mailer, conn):
     register(client)
     r = register(client, first_name="Other")

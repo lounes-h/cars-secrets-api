@@ -36,6 +36,14 @@ The client IP is `X-Client-IP` only when the request also carries `X-Internal-Ke
 `INTERNAL_API_KEY` (compared in constant time); otherwise the TCP peer. The web server sets
 both, so throttling applies to visitors and not to the web server's address.
 
+## Email verification
+
+Password logins require a confirmed email address (`403 email_unverified`).
+`SKIP_EMAIL_VERIFICATION=true` lifts that check for local development: the
+confirmation email is still sent and `email_verified` stays false, but login no
+longer waits for it. The API logs a warning at startup whenever it is on. It must
+stay off in any shared or production environment.
+
 ## Email tokens
 
 Verification (24 h) and reset (1 h) tokens are random, stored hashed, single use, bound to a

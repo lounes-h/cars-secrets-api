@@ -18,6 +18,9 @@ from .mail import Mailer, make_mailer
 def create_app(settings: Settings | None = None, *, mailer: Mailer | None = None,
                http: httpx.Client | None = None) -> FastAPI:
     settings = settings or get_settings()
+    if settings.skip_email_verification:
+        logging.getLogger(__name__).warning(
+            "SKIP_EMAIL_VERIFICATION is on: unconfirmed accounts can sign in. Development only.")
     pool = make_pool(settings.database_url)                     # ingest tables, read-only
     rw_pool = make_pool(settings.database_url, read_only=False)  # the `app` schema
     http = http or httpx.Client()
