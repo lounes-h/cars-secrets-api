@@ -11,8 +11,8 @@ def test_app_schema_is_created_by_migrations(conn):
     }
 
 
-def test_cli_takes_database_url_from_settings(conn, db_url, monkeypatch):
-    """`alembic upgrade head` from a shell reads DATABASE_URL like the app (env or .env)."""
+def test_cli_takes_database_url_from_dotenv(conn, db_url, monkeypatch, tmp_path):
+    """`alembic upgrade head` from a shell reads DATABASE_URL from .env, like the app."""
     from pathlib import Path
 
     from alembic import command
@@ -22,10 +22,14 @@ def test_cli_takes_database_url_from_settings(conn, db_url, monkeypatch):
 
     root = Path(__file__).resolve().parent.parent
     conn.execute("DROP SCHEMA app CASCADE")
-    monkeypatch.setenv("DATABASE_URL", db_url)
+    (tmp_path / ".env").write_text(f"DATABASE_URL={db_url}\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     get_settings.cache_clear()
     try:
-        command.upgrade(Config(str(root / "alembic.ini")), "head")   # no database_url attribute
+        cfg = Config(str(root / "alembic.ini"))                      # no database_url attribute
+        cfg.set_main_option("script_location", str(root / "migrations"))
+        command.upgrade(cfg, "head")
     finally:
         get_settings.cache_clear()
     assert conn.execute("SELECT version_num FROM app.alembic_version").fetchone() == {
