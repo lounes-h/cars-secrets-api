@@ -1,0 +1,62 @@
+"""Tests run against a real PostgreSQL: TEST_DATABASE_URL if set, otherwise a throwaway
+container started through testcontainers (needs Docker). The `lots` table comes from
+tests/schema.sql, a copy of the ingest repo's DDL."""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
+
+import psycopg
+import pytest
+from fastapi.testclient import TestClient
+
+from app.config import Settings
+from app.main import create_app
+
+SCHEMA = Path(__file__).parent / "schema.sql"
+
+
+@pytest.fixture(scope="session")
+def db_url() -> Iterator[str]:
+    url = os.environ.get("TEST_DATABASE_URL")
+    if url:
+        yield url
+        return
+    from testcontainers.community.postgres import PostgresContainer
+
+    with PostgresContainer("postgres:17-alpine", driver=None) as pg:
+        yield pg.get_connection_url()
+
+
+@pytest.fixture
+def conn(db_url: str) -> Iterator[psycopg.Connection]:
+    """An empty, freshly created `lots` table for every test."""
+    with psycopg.connect(db_url, autocommit=True) as c:
+        c.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public")
+        c.execute(SCHEMA.read_text())
+        yield c
+
+
+@pytest.fixture
+def client(conn: psycopg.Connection, db_url: str) -> Iterator[TestClient]:
+    app = create_app(Settings(_env_file=None, database_url=db_url))
+    with TestClient(app) as tc:
+        yield tc
+
+
+def insert_lot(conn: psycopg.Connection, lot_number: str, **overrides: Any) -> None:
+    row: dict[str, Any] = {
+        "source": "copart", "lot_number": lot_number, "year": 2020, "make": "TOYOTA",
+        "model_group": "CAMRY", "vin": f"VIN{lot_number:0>14}", "sale_at": "2026-10-01T15:00Z",
+        "high_bid": 1500, "est_retail_value": 12000, "repair_cost": 4000,
+        "attributes": "{}", "row_hash": b"\x00", "first_seen_at": "2026-09-01T00:00Z",
+        "last_seen_at": "2026-09-19T00:00Z", "last_changed_at": "2026-09-10T00:00Z",
+        "removed_at": None,
+    }
+    row.update(overrides)
+    cols = ", ".join(row)
+    params = ", ".join(f"%({k})s" for k in row)
+    conn.execute(f"INSERT INTO lots ({cols}) VALUES ({params})", row)

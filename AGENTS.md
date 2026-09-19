@@ -1,146 +1,72 @@
-# Cars Secrets Data Ingest
+# Cars Secrets API
 
-Continuous ingestion of vehicle-auction CSV exports into PostgreSQL, with a React dashboard
-for monitoring and alerts. Copart is the first provider; others (IAAI, …) plug in without a
-migration. The Copart downloader (`ingest/downloader`, runs on the host via launchd) saves
-an export into `data/inbox/<provider>/` every hour; saving the file triggers ingestion.
+Read-only HTTP API for the Car's Secrets dealer platform. It serves active auction lots from
+the PostgreSQL database that [cars-secrets-data-ingest](https://github.com/lounes-h/cars-secrets-data-ingest)
+fills and migrates, to the web app (`cars-secrets-web`). Bidding is never handled here: each
+lot carries a `listing_url` to the auction site.
 
 ## Tech stack
 
-- **Backend** (`backend/`): Python 3.12, psycopg 3 (`COPY` for bulk loads), FastAPI + uvicorn,
-  watchdog (file events), pydantic-settings, Alembic, structlog. Package: `ingest`.
-- **Database**: PostgreSQL 17.
-- **Frontend** (`frontend/`): React 19 + TypeScript, Vite, TanStack Query, React Router,
-  Recharts. Served by nginx, which also proxies `/api`.
-- **Runtime**: Docker Compose — `db`, `migrate` (one-shot), `worker`, `api`, `web`.
-- **Tests**: pytest + testcontainers (real Postgres), Vitest + Testing Library.
+- Python 3.12 (`.python-version`), managed with uv. Package: `app`.
+- FastAPI + uvicorn, psycopg 3 (raw SQL, `dict_row`, connection pool), pydantic-settings.
+- Tests: pytest + httpx against a real PostgreSQL 17 (testcontainers, or `TEST_DATABASE_URL`).
+- Lint: ruff (line length 100, rules `E F I B UP SIM`).
+- Hosting is not chosen yet. A Dockerfile exists; there is no compose file.
 
 ## Commands
 
 ```bash
-./start.sh                      # build + start everything; creates .env with secrets on first run
-./start.sh --logs               # same, then follow worker/api logs
-docker compose down             # stop (add -v to also drop the database)
-python3 scripts/simulate_export.py   # drop a realistic "next hour" export into the inbox
-./scripts/install_downloader.sh      # (re)install the always-on Copart downloader; start.sh does it
-(cd backend && .venv/bin/python -m ingest.downloader login|run --force|status|daemon)
-
-# backend (from backend/)
-uv sync                         # create .venv with dev dependencies
-.venv/bin/pytest                # all tests; starts a throwaway Postgres via Docker
-TEST_DATABASE_URL=postgresql://… .venv/bin/pytest   # reuse an existing Postgres (it is wiped)
-.venv/bin/ruff check ingest tests migrations
-
-# frontend (from frontend/)
-npm ci
-npm test                        # vitest
-npm run typecheck
-npm run build
-npm run dev                     # dev server on :5173, proxies /api to localhost:8000
+cp .env.example .env                                    # DATABASE_URL of the ingest Postgres
+uv sync                                                 # create .venv with dev dependencies
+uv run uvicorn app.main:app_factory --factory --reload  # http://localhost:8000/api/docs
+uv run ruff check app tests
+uv run pytest                                           # throwaway Postgres via Docker
+TEST_DATABASE_URL=postgresql://… uv run pytest          # reuse a Postgres (public schema is wiped)
+docker build -t cars-secrets-api .
 ```
+
+Run `uv run ruff check app tests && uv run pytest` before committing. GitHub Actions runs
+both on every pull request and on pushes to `main` (`.github/workflows/ci.yml`).
 
 ## Architecture rules (important)
 
-- **Flow**: `worker` watches `inbox/<provider>/` (filesystem events + a 30 s rescan safety
-  net), waits until the file stops changing, then `pipeline.process_file` registers it in
-  `ingest_files`, skips byte-identical files (sha256), and `loader.load_file` loads it in
-  **one transaction**: COPY into a temp `stage` table → change detection → `lot_versions`
-  snapshot → upsert `lots` → removals → column registry. Success archives the file gzipped;
-  failure moves it to `failed/` and raises a critical alert. Never split the load across
-  transactions: a lot must never be half-updated.
-- **Provider-neutral schema**: `lots` has typed canonical columns (`schema.CANONICAL_COLUMNS`,
-  must match the migration — a test enforces it) keyed by `(source, lot_number)`, plus
-  `attributes` JSONB holding every source column. Provider specifics live only in
-  `ingest/providers/<name>.py` (header aliases, key parsing, derived columns, ignored and
-  volatile columns, removal scope). Adding a provider = new module + registry entry, no
-  migration. Adding a canonical column = migration + `schema.py` + mappings.
-- **Schema drift never fails a file**: unknown columns go to `attributes` and the registry
-  with a warning; a missing mapped column becomes NULL with a warning. Only a missing lot
-  key rejects the file. Renamed headers are handled by adding an alias to the provider.
-- **Malformed rows**: Copart does not escape quotes inside values (`29'9"`);
-  `Provider.split_record` re-reads such records Copart's way, kept only when the field count
-  matches. A row with the wrong field count is rejected (never loaded shifted), but its lot
-  is not treated as missing for removals.
-- **Change detection**: row hash over canonicalized, non-volatile attributes (`Id` is
-  ignored, `Create Date/Time` is volatile, `8119.0` == `8119`). If the column set changed
-  since the last file, only columns present in both files are compared, so drift never marks
-  every lot as updated. Only real changes write `lot_versions` (full history).
-- **Removals are scoped and wait for the auction**: Copart downloads can be a subset of
-  yards, so a lot missing from a file is marked removed only if its yard
-  (`Provider.removal_scope`) is in the file **and** the file holds ≥ 50 % of that yard's
-  active lots (otherwise the yard is skipped + info alert), **and** its `sale_at` +
-  `REMOVAL_GRACE_MINUTES` (120) has passed — bidding ends after the sale opens. Deferred lots
-  stay active and are removed by the first later file that still lacks them. Lots without a
-  sale time have no pending auction and are removed immediately.
-- **Lot photos**: `Provider.fetch_images` lists photos on demand (API
-  `/api/lots/{source}/{lot}/images`, cached 15 min). It only uses URLs stored for the lot and
-  only contacts/returns allow-listed hosts (Copart: `inventoryv2.copart.io` for the list,
-  `cs.copart.com` for images, which the CSP `img-src` allows). Browsers load images directly.
-- **Alerts**: rules are pure functions (`alerts.evaluate_*`, `monitor.check_*`) so they are
-  unit-testable; storage dedupes by `fingerprint` (one open alert per condition). Conditions
-  that can clear (worker down, no new file, missing column) are auto-resolved. The API
-  process runs the periodic checks, so a dead worker is still reported.
-- **Live dashboard**: every state change calls `db.notify` (`pg_notify`) inside the same
-  transaction; the API LISTENs and fans out over SSE (`/api/events`); the UI invalidates
-  queries per event type (`frontend/src/lib/events.ts`).
-- Timestamps that measure work use `clock_timestamp()`, not `now()` (transaction start).
-- **Downloader** (`ingest/downloader`, see `docs/downloader.md`): real Chrome via Playwright
-  with a persistent profile; a person logs in once with `login` and saves the password in
-  Chrome. Pure logic lives in `core.py` (tested with a fake browser); `browser.py` is the
-  only code that touches Copart. It must never type or store credentials, solve or bypass a
-  CAPTCHA/bot check, rotate IPs or spoof fingerprints. It runs unattended: when the session
-  expired, a run clicks "Sign in" **once** if Chrome's password manager filled both fields; a
-  login page it cannot pass is a failed run, and `MAX_FAILED_LOGINS` (3) in a row pause
-  downloads (account lockout). A challenge page pauses at once. Pauses raise a critical alert
-  until a person runs `login`. Pop-ups are closed only through close-type controls
-  (`core.CLOSE_LABEL`, never accept/agree), never on a challenge page;
-  `COPART_DISMISS_SELECTORS` adds selectors. It waits a random 1.5–4 s before each click. A
-  Chrome crash relaunches it within the run (`BROWSER_ATTEMPTS`), after stopping orphaned
-  Chrome processes on the profile. The export is read from the response over CDP
-  (`Fetch.takeResponseBodyAsStream`), never through Chrome's download manager, which crashes
-  Chrome 153 on macOS when finalizing large files. Browser tests use a fake Copart on `copart.test` behind a catch-all route (no
-  HTTP redirects, which bypass routing), so they never reach the real site. Pacing (≥ 45 min between downloads, exponential backoff) is enforced in
-  code, not only by the scheduler. Downloads are validated, then handed to the inbox via a
-  `.part` rename. It runs as an always-on process (`daemon.py`, launchd `KeepAlive`, installed
-  or updated by `start.sh`) that plans its own downloads, heartbeats and publishes its state to
-  `downloader_status` (best effort); the dashboard's "Download now" sets `run_requested_at`,
-  which it picks up within seconds. A file lock keeps one Chrome per profile.
+See `docs/architecture.md` for details.
+
+- The database belongs to the ingest repo. This API **reads** its `lots` table and never
+  writes it: every pooled connection is opened with `default_transaction_read_only=on`
+  (`app/db.py`). Schema changes to ingest tables are made in the ingest repo, never here.
+- When this API needs tables of its own (users, saved lots, searches, alerts), they go in a
+  separate `app` schema of the same database with this repo's own Alembic history. There are
+  no migrations yet.
+- Use the ingest's terminology: a vehicle listing is a **lot**, keyed by `(source, lot_number)`.
+- Routes live under `/api` on two routers in `app/main.py`: `public` (health) and `api`
+  (everything else). Authentication, when it comes, is a dependency of the `api` router; new
+  routes go on `api`, never on `public`, unless they must stay public.
+- Responses are explicit pydantic models (`app/lots.py`): the typed lot columns the web app
+  needs. Never expose the raw `attributes` JSONB. Amounts serialize as JSON numbers.
+- SQL is raw and always parameterized. Only code constants (column lists, fixed WHERE
+  fragments) are interpolated; LIKE patterns go through `escape_like`.
+- Only active lots (`removed_at IS NULL`) are served.
+- Deal arithmetic (cost, profit, margin, max bid) currently lives in the web repo
+  (`src/lib/deal.ts`); do not port it here until the user asks.
 
 ## Security rules
 
-- Never commit `.env`, real exports under `data/`, or database dumps. `.env` is generated by
-  `start.sh` with random secrets and mode 600.
-- Every `/api` route except `/api/health` and `/api/auth/login` requires the session cookie
-  (signed with `SESSION_SECRET`, http-only, `SameSite=Strict`). New routes go on the
-  authenticated router in `api/app.py`, never on `public`.
-- The API refuses to start without `DASHBOARD_PASSWORD` or with a `SESSION_SECRET` under 32
-  characters. Credentials are compared in constant time; failed logins are rate-limited per
-  client IP (nginx overwrites `X-Forwarded-For`, so it cannot be spoofed).
-- SQL is always parameterized. The only f-string SQL interpolates code constants (column
-  lists, the change predicate) — never request or file data.
-- File operations from the API stay inside configured directories (`retry` checks the path
-  is under `FAILED_DIR`). CSV content is data: in the UI render it as text, never HTML.
-- Ports bind to `127.0.0.1` only. Set `COOKIE_SECURE=true` when serving over HTTPS.
-- The downloader's Chrome profile (`~/.cars-ingest/copart-profile`, mode 700) holds the Copart
-  session cookie: keep it out of the repo and never copy it elsewhere.
+See `docs/security.md`. No authentication yet; everything is public and read-only.
+`DATABASE_URL` is the only setting and holds a password: `.env` is git-ignored, only
+`.env.example` is committed.
 
 ## Migrations
 
-- Alembic, raw SQL via `op.execute`, in `backend/migrations/versions/NNNN_description.py`.
-  Migrations must not import application code (they are frozen history).
-- Applied automatically by the `migrate` service before `worker`/`api` start, or manually:
-  `cd backend && DATABASE_URL=… .venv/bin/alembic upgrade head`.
-- Never edit a migration that has run anywhere shared; add a new one. Large backfills (e.g.
-  promoting an `attributes` key to a typed column) go in batches.
+None. The ingest repo owns the schema. This repo will get its own Alembic history only for
+tables in its own `app` schema.
 
 ## Tests
 
-Always add tests when adding or changing behaviour. Tests run against a real
-Postgres, not SQLite — the schema uses partial unique indexes and `now()`
-semantics that SQLite does not share.
-
-`backend/tests/fixtures/sample.csv` holds 300 real Copart rows plus 2 malformed (shifted)
-rows; build variations with `make_export` in `conftest.py` rather than adding fixtures.
+Tests sit in `tests/` and run against a real PostgreSQL. `tests/schema.sql` is a copy of the
+ingest's `lots` DDL (migrations 0001 + 0002); refresh it when the ingest adds a column the
+API exposes. Seed rows with `insert_lot` from `tests/conftest.py`; `client` gives a
+`TestClient` over a fresh table.
 
 ## Unit Test Requirements
 
@@ -198,21 +124,12 @@ A code change is not considered complete until the relevant unit tests have been
 
 ## Current state
 
-- Working end to end: watcher → ingest → Postgres, change history, schema-drift handling,
-  yard-scoped removals deferred until the auction is over, alerts (dashboard only, no
-  email/Slack by decision), dashboard with login, live updates, run retry, lot explorer with
-  photos. One provider: Copart.
-- Measured: 142k-row export (89 MB) ingests in ~12 s first time; a 24k-row export in ~3.5 s.
-- Real exports differ in size: 2026-09-15 had 142k rows / 224 yards, 2026-09-17 had 24.5k
-  rows / 44 yards. That is why removals are scoped per yard and the row-count warning fires
-  when download size changes; tune `ROW_COUNT_DEVIATION_RATIO` if it is noisy.
-- Single worker by design (per-provider advisory lock makes a second one safe but idle).
-- Copart downloader built (always-on under launchd, signs in with Chrome's saved login,
-  closes pop-ups, relaunches Chrome after crashes; pauses and alerts on bot pages or a saved
-  login that keeps failing).
-  Copart's Image and Data License Agreement governs the data and photos; the owner is
-  checking that automated downloads are allowed.
-- Not done yet: external alert channels, a second provider.
+Foundation only: settings, read-only pool, `GET /api/health`, `GET /api/lots` (filters `q`,
+`make`, `source`, `year_min`, `year_max`, pagination) and `GET /api/lots/{source}/{lot_number}`,
+with tests, Dockerfile and CI. The only provider in the data is Copart.
+
+There is no auth, no API-owned tables, no saved lots, searches, alerts or deal analysis yet.
+CORS is not enabled; add it when the browser calls the API directly.
 
 ## Branching
 
@@ -220,7 +137,6 @@ Create a branch before starting work. The first Git action of a task is creating
 
 `main` is the production branch — what ships. That is the whole reason task
 work never lands on it directly: a commit there is a release, not a save.
-Render deploys `main`, so a push to it goes live.
 
 Check where the working tree is first:
 
@@ -446,9 +362,9 @@ Update the document that owns the subject:
 
 | Subject | Document |
 |---|---|
-| rules, commands, current state | `CLAUDE.md` |
-| layering, the feature registry, sync collections | `docs/architecture.md` |
-| auth, join codes, isolation, anything returning household data | `docs/security.md` |
+| rules, commands, current state | `AGENTS.md` |
+| layering, routers, the lot contract | `docs/architecture.md` |
+| auth, database access, anything returning data | `docs/security.md` |
 
 Prefer correcting the existing document to adding a new one. A stale sentence is
 worse than no sentence, because it is trusted — so delete what stopped being
