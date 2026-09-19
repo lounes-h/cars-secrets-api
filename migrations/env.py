@@ -1,14 +1,14 @@
 """Migrations for the API-owned `app` schema. The ingest repo owns everything in `public`."""
 
-import os
-
 from alembic import context
 from sqlalchemy import create_engine, text
 
+from app.config import get_settings
 from app.db import sqlalchemy_url
 
 config = context.config
-url = config.attributes.get("database_url") or os.environ["DATABASE_URL"]
+# Tests pass the URL in; the CLI reads DATABASE_URL like the app does (environment or .env).
+url = config.attributes.get("database_url") or get_settings().database_url
 
 engine = create_engine(sqlalchemy_url(url))
 with engine.connect() as connection:
