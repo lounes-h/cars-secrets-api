@@ -1,14 +1,16 @@
 # Cars Secrets API
 
-Read-only HTTP API for the Car's Secrets dealer platform. It serves active auction lots from
-the PostgreSQL database that [cars-secrets-data-ingest](https://github.com/lounes-h/cars-secrets-data-ingest)
-fills and migrates, to the web app (`cars-secrets-web`). Bidding is never handled here: each
-lot carries a `listing_url` to the auction site.
+HTTP API for the Car's Secrets dealer platform: dealer accounts (register, email
+verification, login, sessions, password reset, Google and Apple sign-in) and read-only access
+to the auction lots that [cars-secrets-data-ingest](https://github.com/lounes-h/cars-secrets-data-ingest)
+fills. The web app (`cars-secrets-web`) calls it from its server. Bidding is never handled
+here: each lot carries a `listing_url` to the auction site.
 
 ## Tech stack
 
 - Python 3.12 (`.python-version`), managed with uv. Package: `app`.
-- FastAPI + uvicorn, psycopg 3 (raw SQL, `dict_row`, connection pool), pydantic-settings.
+- FastAPI + uvicorn, psycopg 3 (raw SQL, `dict_row`, two pools), pydantic-settings,
+  Alembic (the `app` schema only), argon2-cffi, PyJWT, phonenumbers, httpx, stdlib smtplib.
 - Tests: pytest + httpx against a real PostgreSQL 17 (testcontainers, or `TEST_DATABASE_URL`).
 - Lint: ruff (line length 100, rules `E F I B UP SIM`).
 - Hosting is not chosen yet. A Dockerfile exists; there is no compose file.
@@ -16,34 +18,45 @@ lot carries a `listing_url` to the auction site.
 ## Commands
 
 ```bash
-cp .env.example .env                                    # DATABASE_URL of the ingest Postgres
+cp .env.example .env                                    # DATABASE_URL of the ingest Postgres, …
 uv sync                                                 # create .venv with dev dependencies
+uv run alembic upgrade head                             # apply this repo's migrations (app schema)
+uv run alembic revision -m "describe change"            # new migration file
 uv run uvicorn app.main:app_factory --factory --reload  # http://localhost:8000/api/docs
-uv run ruff check app tests
+uv run ruff check app tests migrations
 uv run pytest                                           # throwaway Postgres via Docker
-TEST_DATABASE_URL=postgresql://… uv run pytest          # reuse a Postgres (public schema is wiped)
+TEST_DATABASE_URL=postgresql://… uv run pytest          # reuse a Postgres (public + app schemas wiped)
 docker build -t cars-secrets-api .
 ```
 
-Run `uv run ruff check app tests && uv run pytest` before committing. GitHub Actions runs
-both on every pull request and on pushes to `main` (`.github/workflows/ci.yml`).
+Run `uv run ruff check app tests migrations && uv run pytest` before committing. GitHub
+Actions runs both on every pull request and on pushes to `main` (`.github/workflows/ci.yml`).
 
 ## Architecture rules (important)
 
 See `docs/architecture.md` for details.
 
-- The database belongs to the ingest repo. This API **reads** its `lots` table and never
-  writes it: every pooled connection is opened with `default_transaction_read_only=on`
-  (`app/db.py`). Schema changes to ingest tables are made in the ingest repo, never here.
-- When this API needs tables of its own (users, saved lots, searches, alerts), they go in a
-  separate `app` schema of the same database with this repo's own Alembic history. There are
-  no migrations yet.
+- One database, two schemas. The ingest repo owns `public` (`lots`, …): this API **reads** it
+  through `app.state.pool`, whose connections are opened with
+  `default_transaction_read_only=on`. Schema changes to ingest tables are made in the ingest
+  repo, never here.
+- This API owns the `app` schema (accounts), written through `app.state.rw_pool`
+  (`auth.RwConn`) and migrated by `migrations/versions/NNNN_description.py`: raw SQL via
+  `op.execute`, never importing application code, never touching `public`. Never edit a
+  migration that has run anywhere shared; add a new one.
 - Use the ingest's terminology: a vehicle listing is a **lot**, keyed by `(source, lot_number)`.
-- Routes live under `/api` on two routers in `app/main.py`: `public` (health) and `api`
-  (everything else). Authentication, when it comes, is a dependency of the `api` router; new
-  routes go on `api`, never on `public`, unless they must stay public.
-- Responses are explicit pydantic models (`app/lots.py`): the typed lot columns the web app
-  needs. Never expose the raw `attributes` JSONB. Amounts serialize as JSON numbers.
+- Routes live under `/api` on two routers in `app/main.py`: `public` (health, auth) and `api`
+  (lots). A route for a signed-in dealer declares `user: auth.User` (bearer session); do not
+  reimplement session checks.
+- Auth flows are in `app/auth.py`, storage in `app/accounts.py`, primitives in
+  `app/security.py`, `app/mail.py` and `app/oauth.py`. Outbound HTTP goes through
+  `app.state.http` and mail through `app.state.mailer`, so tests can substitute both via
+  `create_app(settings, mailer=..., http=...)`.
+- Responses are explicit pydantic models or plain dicts with a fixed shape (`app/lots.py`,
+  `auth.public_user`). Never expose the raw `attributes` JSONB, password hashes or token
+  hashes. Amounts serialize as JSON numbers. Errors are
+  `{"detail": {"code": "...", "message": "..."}}`; field errors use FastAPI's list shape
+  (`auth.field_error`).
 - SQL is raw and always parameterized. Only code constants (column lists, fixed WHERE
   fragments) are interpolated; LIKE patterns go through `escape_like`.
 - Only active lots (`removed_at IS NULL`) are served.
@@ -52,21 +65,24 @@ See `docs/architecture.md` for details.
 
 ## Security rules
 
-See `docs/security.md`. No authentication yet; everything is public and read-only.
-`DATABASE_URL` is the only setting and holds a password: `.env` is git-ignored, only
-`.env.example` is committed.
+See `docs/security.md`. Every new unauthenticated write endpoint calls `auth.require_captcha`
+and counts attempts in `app.throttle` when it can be abused. Never reveal whether an email is
+registered. Never log request bodies, passwords or tokens. Secrets come from `.env`
+(git-ignored); `.env.example` lists the names only.
 
 ## Migrations
 
-None. The ingest repo owns the schema. This repo will get its own Alembic history only for
-tables in its own `app` schema.
+Alembic, raw SQL, `app` schema only (`migrations/`, version table `app.alembic_version`).
+`uv run alembic upgrade head` applies them; tests apply them to their throwaway database.
 
 ## Tests
 
 Tests sit in `tests/` and run against a real PostgreSQL. `tests/schema.sql` is a copy of the
 ingest's `lots` DDL (migrations 0001 + 0002); refresh it when the ingest adds a column the
-API exposes. Seed rows with `insert_lot` from `tests/conftest.py`; `client` gives a
-`TestClient` over a fresh table.
+API exposes. Fixtures in `tests/conftest.py`: `conn` (fresh database), `settings`, `mailer`
+(captures messages, `last_link(path)` extracts a token), `http_handler` (set `.fn` to script
+Turnstile / HIBP / OAuth responses), `client` (`TestClient` over `create_app` with those
+fakes), `insert_lot`.
 
 ## Unit Test Requirements
 
@@ -124,12 +140,16 @@ A code change is not considered complete until the relevant unit tests have been
 
 ## Current state
 
-Foundation only: settings, read-only pool, `GET /api/health`, `GET /api/lots` (filters `q`,
-`make`, `source`, `year_min`, `year_max`, pagination) and `GET /api/lots/{source}/{lot_number}`,
-with tests, Dockerfile and CI. The only provider in the data is Copart.
+Working: read-only lots (`/api/lots`), accounts (register with terms acceptance and optional
+E.164 phone, email verification, login with remember-me and captcha after repeated failures,
+logout, me, forgot / reset password), Google and Apple sign-in (built and tested with fakes;
+they need credentials in `.env` to be offered). Mail goes to the log until `SMTP_*` is set;
+the captcha is enforced only with `TURNSTILE_SECRET`. The only provider in the lot data is
+Copart.
 
-There is no auth, no API-owned tables, no saved lots, searches, alerts or deal analysis yet.
-CORS is not enabled; add it when the browser calls the API directly.
+Not done: terms of use and privacy policy documents, profile editing, email change, account
+deletion, MFA, saved lots, searches, alerts, deal analysis. CORS is not enabled; the web app
+calls the API from its server.
 
 ## Branching
 

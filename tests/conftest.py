@@ -9,11 +9,14 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from psycopg.rows import dict_row
 
 from app.config import Settings
+from app.db import run_migrations
 from app.main import create_app
 
 SCHEMA = Path(__file__).parent / "schema.sql"
@@ -33,16 +36,58 @@ def db_url() -> Iterator[str]:
 
 @pytest.fixture
 def conn(db_url: str) -> Iterator[psycopg.Connection]:
-    """An empty, freshly created `lots` table for every test."""
-    with psycopg.connect(db_url, autocommit=True) as c:
-        c.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public")
+    """A fresh database for every test: the ingest `lots` table from schema.sql and this
+    repo's `app` schema from its migrations."""
+    with psycopg.connect(db_url, autocommit=True, row_factory=dict_row) as c:
+        c.execute("DROP SCHEMA IF EXISTS app CASCADE; DROP SCHEMA public CASCADE; "
+                  "CREATE SCHEMA public")
         c.execute(SCHEMA.read_text())
+        run_migrations(db_url)
         yield c
 
 
+class FakeMailer:
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str, str]] = []
+
+    def send(self, to: str, subject: str, body: str) -> None:
+        self.sent.append((to, subject, body))
+
+    def last_link(self, path: str) -> str:
+        """The token in the last mail's link for `path`, e.g. '/verify-email'."""
+        body = self.sent[-1][2]
+        start = body.index(f"{path}?token=") + len(f"{path}?token=")
+        return body[start:].split()[0]
+
+
 @pytest.fixture
-def client(conn: psycopg.Connection, db_url: str) -> Iterator[TestClient]:
-    app = create_app(Settings(_env_file=None, database_url=db_url))
+def settings(db_url: str) -> Settings:
+    return Settings(
+        _env_file=None, database_url=db_url, web_url="https://web.test",
+        internal_api_key="k" * 32, check_breached_passwords=False,
+    )
+
+
+@pytest.fixture
+def mailer() -> FakeMailer:
+    return FakeMailer()
+
+
+@pytest.fixture
+def http_handler():
+    """Tests replace `handler.fn` to script outbound HTTP (Turnstile, HIBP, OAuth)."""
+    class Handler:
+        fn = staticmethod(lambda request: httpx.Response(500))
+
+        def __call__(self, request: httpx.Request) -> httpx.Response:
+            return self.fn(request)
+    return Handler()
+
+
+@pytest.fixture
+def client(conn, settings, mailer, http_handler) -> Iterator[TestClient]:
+    http = httpx.Client(transport=httpx.MockTransport(http_handler))
+    app = create_app(settings, mailer=mailer, http=http)
     with TestClient(app) as tc:
         yield tc
 
