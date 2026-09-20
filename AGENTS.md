@@ -6,6 +6,9 @@ to the auction lots that [cars-secrets-data-ingest](https://github.com/lounes-h/
 fills. The web app (`cars-secrets-web`) calls it from its server. Bidding is never handled
 here: each lot carries a `listing_url` to the auction site.
 
+## Project specification
+read `docs/PROJECT_SPEC.md`
+
 ## Tech stack
 
 - Python 3.12 (`.python-version`), managed with uv. Package: `app`.
