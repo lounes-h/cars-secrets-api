@@ -7,7 +7,7 @@ fills. The web app (`cars-secrets-web`) calls it from its server. Bidding is nev
 here: each lot carries a `listing_url` to the auction site.
 
 ## Project specification
-read `docs/PROJECT_SPEC.md`
+read `docs/project-specification.md`
 
 ## Tech stack
 
