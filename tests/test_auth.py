@@ -166,6 +166,39 @@ def test_resend_verification(client, mailer):
     assert len(mailer.sent) == n + 1
 
 
+def test_an_address_cannot_be_mailed_over_and_over(client, mailer, settings):
+    """Anyone can name any address here, so the number of mails it can trigger is capped —
+    without telling the caller anything: the answer stays {"ok": true}."""
+    settings.mails_per_email = 2
+    register(client)                      # the verification mail itself counts as one
+    n = len(mailer.sent)
+    resend = lambda: client.post("/api/auth/resend-verification",  # noqa: E731
+                                 json={"email": "dana@example.com"})
+    assert resend().status_code == 200 and len(mailer.sent) == n + 1
+    assert resend().status_code == 200
+    assert len(mailer.sent) == n + 1, "the third mail to that address is not sent"
+
+
+def test_forgot_password_is_capped_per_address(client, mailer, settings):
+    settings.mails_per_email = 1
+    verified_user(client, mailer)
+    n = len(mailer.sent)
+    for _ in range(3):
+        assert client.post("/api/auth/forgot-password",
+                           json={"email": "dana@example.com"}).status_code == 200
+    assert len(mailer.sent) == n + 1
+
+
+def test_registering_again_stops_mailing_the_owner(client, mailer, settings):
+    settings.mails_per_email = 1
+    register(client)
+    n = len(mailer.sent)
+    assert register(client).status_code == 200
+    assert len(mailer.sent) == n + 1      # the "you already have an account" hint
+    assert register(client).status_code == 200
+    assert len(mailer.sent) == n + 1
+
+
 def test_forgot_and_reset_password(client, mailer):
     verified_user(client, mailer)
     old_session = login(client).json()["token"]
