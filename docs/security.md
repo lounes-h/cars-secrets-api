@@ -19,7 +19,9 @@ Logout revokes the session; a password reset revokes all of the user's sessions.
 
 ## Passwords
 
-Argon2id (argon2-cffi defaults). 10 to 128 characters, no composition rules. On registration
+Argon2id (argon2-cffi defaults). 8 to 128 characters, with at least one that is not a letter
+or a digit — the same rule the web form applies, so a password it accepts is never refused
+here for its shape. On registration
 and reset the password is checked against Have I Been Pwned by k-anonymity: only the first
 five characters of its SHA-1 leave the server, and a network failure lets the password through
 (`CHECK_BREACHED_PASSWORDS=false` disables the check).

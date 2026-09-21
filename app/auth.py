@@ -70,6 +70,8 @@ def check_password(request: Request, password: str) -> None:
     if not security.MIN_PASSWORD <= len(password) <= security.MAX_PASSWORD:
         raise field_error("password", f"Use {security.MIN_PASSWORD} to {security.MAX_PASSWORD} "
                           "characters.")
+    if all(character.isalnum() for character in password):
+        raise field_error("password", "Add at least one special character, like ! ? or #.")
     s = request.app.state.settings
     if s.check_breached_passwords and security.password_is_breached(password,
                                                                     request.app.state.http):
@@ -106,6 +108,8 @@ def issue_session(request: Request, conn: psycopg.Connection, user_id, *, rememb
 
 
 Name = Annotated[str, Field(min_length=1, max_length=100, pattern=r"\S")]
+# The longest address RFC 5321 allows, and what the web form lets anyone type.
+Email = Annotated[EmailStr, Field(max_length=254)]
 
 
 # --- registration and verification ------------------------------------------------------------
@@ -113,7 +117,7 @@ Name = Annotated[str, Field(min_length=1, max_length=100, pattern=r"\S")]
 class RegisterIn(BaseModel):
     first_name: Name
     last_name: Name
-    email: EmailStr
+    email: Email
     phone: str | None = None
     password: str
     accept_terms: bool
@@ -155,7 +159,7 @@ def verify_email(body: TokenIn, conn: RwConn) -> dict[str, bool]:
 
 
 class EmailIn(BaseModel):
-    email: EmailStr
+    email: Email
     captcha_token: str | None = None
 
 
@@ -173,7 +177,7 @@ def resend_verification(body: EmailIn, request: Request, conn: RwConn) -> dict[s
 # --- login and sessions -----------------------------------------------------------------------
 
 class LoginIn(BaseModel):
-    email: EmailStr
+    email: Email
     password: str
     remember: bool = False
     captcha_token: str | None = None

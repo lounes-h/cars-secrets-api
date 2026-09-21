@@ -71,14 +71,21 @@ def test_register_existing_email_sends_a_hint_instead(client, mailer, conn):
 
 
 @pytest.mark.parametrize(("field", "value"), [
-    ("password", "short"), ("password", "x" * 129), ("phone", "12345"), ("phone", "abc"),
-    ("accept_terms", False), ("email", "not-an-email"), ("first_name", " "),
+    ("password", "short"), ("password", "x" * 129), ("password", "alldigits1"),
+    ("phone", "12345"), ("phone", "abc"), ("accept_terms", False),
+    ("email", "not-an-email"), ("email", f"{'a' * 250}@example.com"), ("first_name", " "),
 ])
 def test_register_validation(client, conn, field, value):
     r = register(client, **{field: value})
     assert r.status_code == 422, r.text
     assert any(field in err["loc"] for err in r.json()["detail"])
     assert conn.execute("SELECT count(*) AS n FROM app.users").fetchone()["n"] == 0
+
+
+def test_register_accepts_the_shortest_allowed_password(client, conn):
+    """The web form asks for the same: 8 characters with one that is not a letter or a digit."""
+    assert register(client, password="abcdefg!").status_code == 200
+    assert conn.execute("SELECT count(*) AS n FROM app.users").fetchone()["n"] == 1
 
 
 def test_register_without_phone(client, conn):

@@ -7,7 +7,7 @@ import httpx
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 
-MIN_PASSWORD, MAX_PASSWORD = 10, 128
+MIN_PASSWORD, MAX_PASSWORD = 8, 128
 HIBP_URL = "https://api.pwnedpasswords.com/range/"
 TURNSTILE_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 
