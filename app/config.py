@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     login_failures_per_ip: int = 10
     throttle_window_seconds: int = 900
 
+    # Mails an address, or one client, can trigger in the window. Anyone can ask us to mail
+    # any address, so the cap is what keeps an inbox from being used as a weapon.
+    mails_per_email: int = 3
+    mails_per_ip: int = 10
+
     # Cloudflare Turnstile; empty secret = captcha not enforced (development, tests).
     turnstile_secret: str = Field(default="", repr=False)
     check_breached_passwords: bool = True

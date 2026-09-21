@@ -64,6 +64,7 @@ escaped. Results are ordered `sale_at ASC NULLS LAST, lot_number`.
   Turnstile token (`429 captcha_required`). Success returns a session token; the web server
   stores it in a cookie and sends it back as a bearer. `remember` picks a 30-day session
   instead of 12 hours idle; every use slides the expiry.
+- Mails that anyone can trigger for an address they do not own (verification, the "you already have an account" hint, password reset) go through `auth.mail_allowed`, which caps them per address and per client.
 - **Forgot / reset**: a `reset_password` token by mail; reset sets the new hash, marks the
   address verified and revokes every session of the user.
 - **Social login**: `start` stores `(state, nonce, PKCE verifier)` and returns the provider's

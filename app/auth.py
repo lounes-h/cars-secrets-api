@@ -66,6 +66,21 @@ def require_captcha(request: Request, token: str | None) -> None:
         raise error(400, "captcha_failed", "Please complete the captcha and try again.")
 
 
+def mail_allowed(request: Request, conn: psycopg.Connection, kind: str, email: str) -> bool:
+    """Whether we may mail this address again. Anyone can name any address in register,
+    resend-verification and forgot-password, so each one is capped per address and per client
+    over the throttle window. The answer to the caller never changes: still `{"ok": true}`."""
+    s = request.app.state.settings
+    keys = (f"mail:{kind}:{email}", f"mail:ip:{client_ip(request)}")
+    limits = (s.mails_per_email, s.mails_per_ip)
+    if any(accounts.throttle_count(conn, k, s.throttle_window_seconds) >= n
+           for k, n in zip(keys, limits, strict=True)):
+        return False
+    for k in keys:
+        accounts.throttle_hit(conn, k)
+    return True
+
+
 def check_password(request: Request, password: str) -> None:
     if not security.MIN_PASSWORD <= len(password) <= security.MAX_PASSWORD:
         raise field_error("password", f"Use {security.MIN_PASSWORD} to {security.MAX_PASSWORD} "
@@ -135,12 +150,14 @@ def register(body: RegisterIn, request: Request, conn: RwConn) -> dict[str, bool
     s, mailer = request.app.state.settings, request.app.state.mailer
     email = accounts.normalize_email(body.email)
     if accounts.user_by_email(conn, email):
-        mailer.send(email, *mail.existing_account_mail(s.web_url))
+        if mail_allowed(request, conn, "existing", email):
+            mailer.send(email, *mail.existing_account_mail(s.web_url))
         return {"ok": True}
     user = accounts.create_user(
         conn, email=email, first_name=body.first_name.strip(), last_name=body.last_name.strip(),
         phone=phone, password_hash=security.hash_password(body.password), terms_accepted=True)
     token = accounts.create_token(conn, user["id"], "verify_email", s.verify_token_seconds)
+    mail_allowed(request, conn, "verify", email)
     mailer.send(email, *mail.verification_mail(s.web_url, token))
     return {"ok": True}
 
@@ -168,7 +185,8 @@ def resend_verification(body: EmailIn, request: Request, conn: RwConn) -> dict[s
     require_captcha(request, body.captcha_token)
     s, mailer = request.app.state.settings, request.app.state.mailer
     user = accounts.user_by_email(conn, body.email)
-    if user and user["email_verified_at"] is None:
+    if (user and user["email_verified_at"] is None
+            and mail_allowed(request, conn, "verify", user["email"])):
         token = accounts.create_token(conn, user["id"], "verify_email", s.verify_token_seconds)
         mailer.send(user["email"], *mail.verification_mail(s.web_url, token))
     return {"ok": True}
@@ -221,7 +239,7 @@ def forgot_password(body: EmailIn, request: Request, conn: RwConn) -> dict[str, 
     require_captcha(request, body.captcha_token)
     s, mailer = request.app.state.settings, request.app.state.mailer
     user = accounts.user_by_email(conn, body.email)
-    if user:
+    if user and mail_allowed(request, conn, "reset", user["email"]):
         token = accounts.create_token(conn, user["id"], "reset_password", s.reset_token_seconds)
         mailer.send(user["email"], *mail.reset_mail(s.web_url, token))
     return {"ok": True}
