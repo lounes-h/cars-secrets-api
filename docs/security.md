@@ -34,6 +34,12 @@ Failed logins are counted per email (3) and per client IP (10) over 15 minutes i
 captcha token when `TURNSTILE_SECRET` is set. Without it, nothing is enforced: set it in
 production.
 
+Those three endpoints mail an address the caller names, and the caller need not own it, so
+each one is also capped: `MAILS_PER_EMAIL` (3) per address and `MAILS_PER_IP` (10) per client
+over the same window, counted only when a mail actually goes out (`auth.mail_allowed`). Past
+the cap nothing is sent and the answer is the unchanged `200 {"ok": true}`, so a capped
+address is indistinguishable from an unknown one and nobody's inbox can be used as a weapon.
+
 The client IP is `X-Client-IP` only when the request also carries `X-Internal-Key` equal to
 `INTERNAL_API_KEY` (compared in constant time); otherwise the TCP peer. The web server sets
 both, so throttling applies to visitors and not to the web server's address.
