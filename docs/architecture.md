@@ -41,7 +41,8 @@ holds every raw export column is not exposed. Amounts are numbers (JSON), not st
 
 Only active lots (`removed_at IS NULL`) are served; a removed lot is a 404. `q` matches a lot
 number exactly, a VIN case-insensitively, or a make / model prefix with LIKE wildcards
-escaped. Results are ordered `sale_at ASC NULLS LAST, lot_number`.
+escaped. Results are ordered `first_seen_at DESC, lot_number`: the lots the ingest saw most
+recently come first, which is what a dealer wants to look at.
 
 ## Accounts (`app` schema)
 

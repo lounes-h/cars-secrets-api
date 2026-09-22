@@ -9,11 +9,11 @@ def lot_numbers(response) -> list[str]:
     return [lot["lot_number"] for lot in response.json()["items"]]
 
 
-def test_lists_active_lots_soonest_sale_first(client, conn):
-    insert_lot(conn, "3", sale_at="2026-10-03T15:00Z")
-    insert_lot(conn, "1", sale_at="2026-10-01T15:00Z")
-    insert_lot(conn, "9", sale_at=None)
-    insert_lot(conn, "2", sale_at="2026-10-02T15:00Z", removed_at="2026-09-18T00:00Z")
+def test_lists_active_lots_newest_first(client, conn):
+    insert_lot(conn, "3", first_seen_at="2026-09-03T00:00Z")
+    insert_lot(conn, "1", first_seen_at="2026-09-05T00:00Z")
+    insert_lot(conn, "9", first_seen_at="2026-09-01T00:00Z")
+    insert_lot(conn, "2", first_seen_at="2026-09-09T00:00Z", removed_at="2026-09-18T00:00Z")
 
     response = client.get("/api/lots")
 
@@ -58,8 +58,9 @@ def test_filters(client, conn):
 
 
 def test_pagination(client, conn):
+    # Same first_seen_at throughout, so the lot number breaks the tie and paging is stable.
     for n in range(1, 6):
-        insert_lot(conn, str(n), sale_at=f"2026-10-0{n}T15:00Z")
+        insert_lot(conn, str(n))
 
     response = client.get("/api/lots", params={"limit": 2, "offset": 2})
 
