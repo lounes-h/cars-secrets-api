@@ -2,13 +2,20 @@
 
 from datetime import datetime
 from typing import Annotated, Any
+from urllib.parse import urlsplit, urlunsplit
 
+import httpx
 import psycopg
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 # Where a dealer goes to bid; the API never handles bidding itself.
 LISTING_URLS = {"copart": "https://www.copart.com/lot/{lot_number}"}
+
+# Copart's public photo list and the host its photos live on. Only these hosts are ever
+# fetched or handed out, whatever the ingest stored in `image_url` / `thumbnail_url`.
+IMAGE_API_HOST = "inventoryv2.copart.io"
+IMAGE_HOST = "cs.copart.com"
 
 COLUMNS = """source, lot_number, year, make, model_group AS model, model_detail, trim, vin,
     body_style, color, damage_primary, damage_secondary, title_type, title_state, has_keys,
@@ -57,10 +64,68 @@ class LotPage(BaseModel):
     total: int
 
 
+class LotImage(BaseModel):
+    """One photo of a lot, in the sizes Copart publishes for it."""
+
+    thumb: str | None
+    full: str | None
+
+
+class LotImages(BaseModel):
+    images: list[LotImage]
+
+
 def to_lot(row: dict[str, Any]) -> Lot:
     template = LISTING_URLS.get(row["source"])
     url = template.format(lot_number=row["lot_number"]) if template else None
     return Lot(**row, listing_url=url)
+
+
+def image_url(raw: Any) -> str | None:
+    """An https URL on Copart's image host, or None."""
+    if not isinstance(raw, str):
+        return None
+    parts = urlsplit(raw.strip())
+    if parts.hostname != IMAGE_HOST:
+        return None
+    return urlunsplit(("https", parts.netloc, parts.path, parts.query, ""))
+
+
+def lot_images(http: httpx.Client, row: dict[str, Any]) -> list[LotImage]:
+    """Every photo of a lot, from Copart's public photo list. Some lots answer 404 there
+    although copart.com shows photos; then only the export's thumbnail is available, whose
+    full-size twin is `_thb` -> `_ful`. Photos are best effort: an upstream failure is an
+    empty list, never an error. Not cached: one lot page is one upstream call.
+    """
+    listing = urlsplit((row.get("image_url") or "").strip())
+    images: list[LotImage] = []
+    if listing.hostname == IMAGE_API_HOST and listing.path.startswith("/v1/lotImages/"):
+        url = urlunsplit(("https", listing.netloc, listing.path, listing.query, ""))
+        try:
+            response = http.get(url, timeout=8)
+            response.raise_for_status()
+            entries = response.json()["lotImages"]
+            for entry in sorted(entries, key=lambda e: e.get("sequence") or 0):
+                thumb = full = None
+                for link in entry.get("link") or []:
+                    photo = None if link.get("isEngineSound") else image_url(link.get("url"))
+                    if photo is None:
+                        continue
+                    if link.get("isThumbNail"):
+                        thumb = thumb or photo
+                    else:
+                        full = full or photo
+                if thumb or full:
+                    images.append(LotImage(thumb=thumb, full=full))
+        except Exception:  # noqa: BLE001 - whatever Copart answered, the lot still has a page
+            images = []
+    if images:
+        return images
+    thumb = image_url(row.get("thumbnail_url"))
+    if thumb is None:
+        return []
+    full = thumb.replace("_thb.", "_ful.") if "_thb." in thumb else None
+    return [LotImage(thumb=thumb, full=full)]
 
 
 def escape_like(value: str) -> str:
@@ -123,5 +188,17 @@ def router(Conn: Any) -> APIRouter:
         if found is None:
             raise HTTPException(404, "lot not found")
         return found
+
+    @r.get("/{source}/{lot_number}/images")
+    def images(source: str, lot_number: str, conn: Conn, request: Request) -> LotImages:
+        """Photos of a lot. Copart is asked with the URLs stored for the lot, never with
+        anything the caller sends."""
+        row = conn.execute(
+            "SELECT image_url, thumbnail_url FROM lots WHERE source = %s AND lot_number = %s "
+            "AND removed_at IS NULL", (source, lot_number),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, "lot not found")
+        return LotImages(images=lot_images(request.app.state.http, row))
 
     return r

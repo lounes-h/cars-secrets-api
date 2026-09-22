@@ -1,3 +1,4 @@
+import httpx
 import psycopg
 import pytest
 
@@ -95,3 +96,80 @@ def test_pool_connections_are_read_only(db_url):
         pytest.raises(psycopg.errors.ReadOnlySqlTransaction),
     ):
         c.execute("INSERT INTO lots (source, lot_number) VALUES ('x', '1')")
+
+
+PHOTO_LIST = "http://inventoryv2.copart.io/v1/lotImages/1?country=us"
+THUMB = "https://cs.copart.com/v1/AUTH_svc/lpp/0926/a_thb.jpg"
+
+
+def photos(sequence: int, name: str) -> dict:
+    return {"sequence": sequence, "link": [
+        {"url": f"https://cs.copart.com/{name}_thb.jpg", "isThumbNail": True},
+        {"url": f"https://cs.copart.com/{name}_ful.jpg"},
+        {"url": f"https://cs.copart.com/{name}_hrs.jpg", "isHdImage": True},
+        {"url": f"https://cs.copart.com/{name}.mp3", "isEngineSound": True},
+    ]}
+
+
+def test_images_lists_every_photo(client, conn, http_handler):
+    insert_lot(conn, "1", image_url=PHOTO_LIST, thumbnail_url=THUMB)
+    http_handler.fn = lambda request: httpx.Response(200, json={"lotImages": [
+        photos(2, "second"), photos(1, "first"),
+    ]})
+
+    response = client.get("/api/lots/copart/1/images")
+
+    assert response.status_code == 200
+    # Copart's own order (by sequence), thumbnail and full size of each photo.
+    assert response.json() == {"images": [
+        {"thumb": "https://cs.copart.com/first_thb.jpg",
+         "full": "https://cs.copart.com/first_ful.jpg"},
+        {"thumb": "https://cs.copart.com/second_thb.jpg",
+         "full": "https://cs.copart.com/second_ful.jpg"},
+    ]}
+
+
+def test_images_ignore_urls_off_copart(client, conn, http_handler):
+    insert_lot(conn, "1", image_url=PHOTO_LIST, thumbnail_url=None)
+    http_handler.fn = lambda request: httpx.Response(200, json={"lotImages": [
+        {"sequence": 1, "link": [{"url": "https://evil.example/a_ful.jpg"}]},
+        {"sequence": 2, "link": [{"url": "https://cs.copart.com/ok_ful.jpg"}]},
+    ]})
+
+    response = client.get("/api/lots/copart/1/images")
+
+    assert response.json() == {"images": [{"thumb": None,
+                                          "full": "https://cs.copart.com/ok_ful.jpg"}]}
+
+
+def test_images_never_ask_a_host_the_caller_chose(client, conn, http_handler):
+    """The stored URL decides what is fetched; an unknown host is not called at all."""
+    insert_lot(conn, "1", image_url="https://evil.example/v1/lotImages/1", thumbnail_url=THUMB)
+    http_handler.fn = lambda request: pytest.fail(f"fetched {request.url}")
+
+    assert client.get("/api/lots/copart/1/images").json() == {"images": [
+        {"thumb": THUMB, "full": THUMB.replace("_thb.", "_ful.")},
+    ]}
+
+
+@pytest.mark.parametrize("answer", [
+    httpx.Response(404),
+    httpx.Response(200, text="not json"),
+    httpx.Response(200, json={"error": "nope"}),
+])
+def test_images_fall_back_to_the_thumbnail(client, conn, http_handler, answer):
+    insert_lot(conn, "1", image_url=PHOTO_LIST, thumbnail_url=THUMB)
+    http_handler.fn = lambda request: answer
+
+    assert client.get("/api/lots/copart/1/images").json() == {"images": [
+        {"thumb": THUMB, "full": THUMB.replace("_thb.", "_ful.")},
+    ]}
+
+
+def test_images_of_a_lot_without_photos(client, conn, http_handler):
+    insert_lot(conn, "1", image_url=None, thumbnail_url=None)
+    insert_lot(conn, "2", removed_at="2026-09-18T00:00Z")
+
+    assert client.get("/api/lots/copart/1/images").json() == {"images": []}
+    assert client.get("/api/lots/copart/2/images").status_code == 404  # removed
+    assert client.get("/api/lots/copart/404/images").status_code == 404

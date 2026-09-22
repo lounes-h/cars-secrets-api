@@ -39,6 +39,14 @@ the token it keeps in its cookie.
 `https://www.copart.com/lot/<n>`, `null` for unknown sources). The `attributes` JSONB that
 holds every raw export column is not exposed. Amounts are numbers (JSON), not strings.
 
+`/{source}/{lot_number}/images` lists a lot's photos. Copart's public photo list is fetched
+through `app.state.http`, always from the URL stored for that lot (`image_url`) and never from
+anything the caller sends, and only URLs on `cs.copart.com` are returned. When that list is
+unavailable — some lots 404 there although copart.com shows photos — the export's thumbnail
+stands in, with its full-size twin (`_thb` -> `_ful`). Photos are best effort: an upstream
+failure is an empty list, not an error. Nothing is cached, so one lot page is one upstream
+call; add a TTL cache if views grow.
+
 Only active lots (`removed_at IS NULL`) are served; a removed lot is a 404. `q` matches a lot
 number exactly, a VIN case-insensitively, or a make / model prefix with LIKE wildcards
 escaped. Results are ordered `first_seen_at DESC, lot_number`: the lots the ingest saw most
