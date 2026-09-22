@@ -89,7 +89,7 @@ def list_lots(
     }
     rows = conn.execute(
         f"""SELECT {COLUMNS} FROM lots WHERE {clause}
-            ORDER BY sale_at ASC NULLS LAST, lot_number LIMIT %(limit)s OFFSET %(offset)s""",
+            ORDER BY first_seen_at DESC, lot_number LIMIT %(limit)s OFFSET %(offset)s""",
         params,
     ).fetchall()
     total = conn.execute(f"SELECT count(*) AS n FROM lots WHERE {clause}", params).fetchone()
@@ -113,7 +113,7 @@ def router(Conn: Any) -> APIRouter:
         year_min: int | None = None, year_max: int | None = None,
         limit: Annotated[int, Query(ge=1, le=100)] = 25, offset: Annotated[int, Query(ge=0)] = 0,
     ) -> LotPage:
-        """Active lots, soonest sale first."""
+        """Active lots, the most recently listed first."""
         return list_lots(conn, q=q, make=make, source=source, year_min=year_min,
                          year_max=year_max, limit=limit, offset=offset)
 

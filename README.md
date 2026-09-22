@@ -22,7 +22,7 @@ Without `SMTP_HOST`, verification and reset links are printed in the log. Withou
 | Route | Returns |
 |---|---|
 | `GET /api/health` | `{"status": "ok"}` once the database answers |
-| `GET /api/lots` | `{items, total}` of active lots, soonest sale first. Filters: `q` (lot number, VIN, make or model prefix), `make`, `source`, `year_min`, `year_max`, `limit` (≤ 100), `offset` |
+| `GET /api/lots` | `{items, total}` of active lots, the most recently listed first. Filters: `q` (lot number, VIN, make or model prefix), `make`, `source`, `year_min`, `year_max`, `limit` (≤ 100), `offset` |
 | `GET /api/lots/{source}/{lot_number}` | One active lot, 404 otherwise |
 | `POST /api/auth/register` | Always `{ok: true}`; sends a verification email (or an "account exists" hint) |
 | `POST /api/auth/verify-email` | Marks the address verified from the emailed token |
