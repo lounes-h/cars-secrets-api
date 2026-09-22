@@ -111,18 +111,21 @@ def test_captcha_required_on_register_when_configured(client, settings, http_han
 
 def test_login_failures_require_a_captcha(client, mailer, settings, http_handler):
     verified_user(client, mailer)
+    settings.turnstile_secret = "sec"
     for _ in range(3):
         r = login(client, password="wrong-password")
         assert r.status_code == 401 and r.json()["detail"]["code"] == "invalid_credentials"
     r = login(client)   # right password, but throttled
     assert r.status_code == 429 and r.json()["detail"]["code"] == "captcha_required"
-    settings.turnstile_secret = "sec"
+    http_handler.fn = lambda r: httpx.Response(200, json={"success": False})
+    assert login(client, captcha_token="invalid").status_code == 429
     http_handler.fn = lambda r: httpx.Response(200, json={"success": True})
     assert login(client, captcha_token="tok").status_code == 200
 
 
-def test_login_throttles_per_client_ip(client, mailer):
+def test_login_throttles_per_client_ip(client, mailer, settings):
     verified_user(client, mailer)
+    settings.turnstile_secret = "sec"
     for n in range(10):
         client.post("/api/auth/login", headers=INTERNAL,
                     json={"email": f"nobody{n}@example.com", "password": "wrong-password"})
@@ -133,6 +136,17 @@ def test_login_throttles_per_client_ip(client, mailer):
     r = client.post("/api/auth/login", headers={"X-Client-IP": "9.9.9.9"},
                     json={"email": "dana@example.com", "password": "long-enough-pw"})
     assert r.status_code == 200
+
+
+@pytest.mark.parametrize("captcha_token", [None, ""])
+def test_login_after_failures_without_captcha_configured(client, mailer, captcha_token):
+    verified_user(client, mailer)
+    for _ in range(3):
+        assert login(client, password="wrong-password").status_code == 401
+    # Development still checks the password, but never asks for a disabled challenge.
+    r = login(client, password="wrong-password", captcha_token=captcha_token)
+    assert r.status_code == 401 and r.json()["detail"]["code"] == "invalid_credentials"
+    assert login(client, captcha_token=captcha_token).status_code == 200
 
 
 def test_unknown_email_is_a_plain_401(client):

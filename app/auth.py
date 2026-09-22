@@ -209,8 +209,8 @@ def login(body: LoginIn, request: Request, conn: RwConn) -> dict[str, Any]:
     limits = (s.login_failures_per_email, s.login_failures_per_ip)
     throttled = any(accounts.throttle_count(conn, k, s.throttle_window_seconds) >= n
                     for k, n in zip(keys, limits, strict=True))
-    if throttled and not (body.captcha_token and security.captcha_ok(
-            body.captcha_token, s.turnstile_secret, ip, request.app.state.http)):
+    if throttled and not security.captcha_ok(
+            body.captcha_token, s.turnstile_secret, ip, request.app.state.http):
         raise error(429, "captcha_required", "Too many attempts. Complete the captcha to continue.")
     user = accounts.user_by_email(conn, email)
     if not security.verify_password(user["password_hash"] if user else None, body.password):

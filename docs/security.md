@@ -29,10 +29,12 @@ five characters of its SHA-1 leave the server, and a network failure lets the pa
 ## Throttling and captcha
 
 Failed logins are counted per email (3) and per client IP (10) over 15 minutes in
-`app.throttle`; past a limit the login needs a valid Cloudflare Turnstile token
-(`429 captcha_required`). Register, resend-verification and forgot-password always require a
-captcha token when `TURNSTILE_SECRET` is set. Without it, nothing is enforced: set it in
-production.
+`app.throttle`; when `TURNSTILE_SECRET` is set, login past a limit needs a valid Cloudflare
+Turnstile token (`429 captcha_required`). Register, resend-verification and forgot-password
+also require a captcha token when that secret is set. Leave it unset in local development:
+all of these flows, including login after repeated failures, skip the captcha check.
+Passwords are still verified. Production must set `TURNSTILE_SECRET` in the API and
+`NEXT_PUBLIC_TURNSTILE_SITE_KEY` in the web app.
 
 Those three endpoints mail an address the caller names, and the caller need not own it, so
 each one is also capped: `MAILS_PER_EMAIL` (3) per address and `MAILS_PER_IP` (10) per client
