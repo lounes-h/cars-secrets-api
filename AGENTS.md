@@ -14,7 +14,8 @@ read `docs/project-specification.md`
 - Python 3.12 (`.python-version`), managed with uv. Package: `app`.
 - FastAPI + uvicorn, psycopg 3 (raw SQL, `dict_row`, two pools), pydantic-settings,
   Alembic (the `app` schema only), argon2-cffi, PyJWT, phonenumbers, httpx, stdlib smtplib.
-- Tests: pytest + httpx against a real PostgreSQL 17 (testcontainers, or `TEST_DATABASE_URL`).
+- Tests: pytest + httpx against a real PostgreSQL 17 (testcontainers, or `TEST_DATABASE_URL`);
+  pytest-cov with a 95 % minimum.
 - Lint: ruff (line length 100, rules `E F I B UP SIM`).
 - Hosting is not chosen yet. A Dockerfile exists; there is no compose file.
 
@@ -28,11 +29,12 @@ uv run alembic revision -m "describe change"            # new migration file
 uv run uvicorn app.main:app_factory --factory --reload  # http://localhost:8000/api/docs
 uv run ruff check app tests migrations
 uv run pytest                                           # throwaway Postgres via Docker
+uv run pytest --cov                                     # the same, failing below 95 % coverage
 TEST_DATABASE_URL=postgresql://… uv run pytest          # reuse a Postgres (public + app schemas wiped)
 docker build -t cars-secrets-api .
 ```
 
-Run `uv run ruff check app tests migrations && uv run pytest` before committing. GitHub
+Run `uv run ruff check app tests migrations && uv run pytest --cov` before committing. GitHub
 Actions runs both on every pull request and on pushes to `main` (`.github/workflows/ci.yml`).
 
 ## Architecture rules (important)
@@ -86,6 +88,12 @@ API exposes. Fixtures in `tests/conftest.py`: `conn` (fresh database), `settings
 (captures messages, `last_link(path)` extracts a token, `last_code()` the confirmation code), `http_handler` (set `.fn` to script
 Turnstile / HIBP / OAuth responses), `client` (`TestClient` over `create_app` with those
 fakes), `insert_lot`.
+
+**Minimum test coverage is 95 %** of `app/` (lines and branches together).
+`uv run pytest --cov` fails below it (`fail_under` under `[tool.coverage.report]` in
+`pyproject.toml`), and CI runs that command, so a pull request that drops coverage under 95 %
+fails. Cover new code in the same change; never lower the threshold or exclude code to get a
+change through.
 
 ## Unit Test Requirements
 

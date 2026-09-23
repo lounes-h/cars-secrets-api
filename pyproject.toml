@@ -22,6 +22,7 @@ dev = [
     "pytest>=8.3",
     "testcontainers[postgres]>=4.8",
     "ruff>=0.6",
+    "pytest-cov>=7.1.0",
 ]
 
 [build-system]
@@ -41,3 +42,13 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+
+[tool.coverage.report]
+# `uv run pytest --cov` fails below this (see AGENTS.md, Tests).
+fail_under = 95
+show_missing = true
+skip_covered = true
