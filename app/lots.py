@@ -25,6 +25,7 @@ COLUMNS = """source, lot_number, year, make, model_group AS model, model_detail,
     odometer, odometer_brand, runs_drives, est_retail_value, repair_cost, high_bid,
     buy_it_now_price, currency, sale_status, sale_date, sale_at, yard_code, yard_name,
     seller_name, location_city, location_state, location_zip, location_country,
+    offsite_address, offsite_city, offsite_state, offsite_zip,
     thumbnail_url, image_url, source_created_at, source_updated_at,
     first_seen_at, last_changed_at"""
 
@@ -69,6 +70,11 @@ class Lot(BaseModel):
     location_state: str | None
     location_zip: str | None
     location_country: str | None
+    # Where the lot is held when it is not at the yard; all None for most lots.
+    offsite_address: str | None
+    offsite_city: str | None
+    offsite_state: str | None
+    offsite_zip: str | None
     thumbnail_url: str | None
     image_url: str | None
     source_created_at: datetime | None

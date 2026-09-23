@@ -83,7 +83,7 @@ Alembic, raw SQL, `app` schema only (`migrations/`, version table `app.alembic_v
 ## Tests
 
 Tests sit in `tests/` and run against a real PostgreSQL. `tests/schema.sql` is a copy of the
-ingest's `lots` DDL (migrations 0001 + 0002); refresh it when the ingest adds a column the
+ingest's `lots` DDL (migrations 0001, 0002 + 0007); refresh it when the ingest adds a column the
 API exposes. Fixtures in `tests/conftest.py`: `conn` (fresh database), `settings`, `mailer`
 (captures messages, `last_link(path)` extracts a token, `last_code()` the confirmation code), `http_handler` (set `.fn` to script
 Turnstile / HIBP / OAuth responses), `client` (`TestClient` over `create_app` with those

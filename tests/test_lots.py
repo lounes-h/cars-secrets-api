@@ -95,8 +95,9 @@ def test_detail_carries_every_lot_column(client, conn):
         conn, "1", vehicle_type="AUTOMOBILE", engine="2.4L 4", cylinders="4", fuel_type="GAS",
         transmission="AUTOMATIC", drive="FRONT", sale_status="PURE SALE", sale_date="2026-10-01",
         yard_code="123", yard_name="CA - VALLEJO", seller_name="INSURANCE CO",
-        location_zip="94590", location_country="USA", source_created_at="2026-09-01T10:00",
-        source_updated_at="2026-09-19T10:00Z",
+        location_zip="94590", location_country="USA", offsite_address="645 W UNION ST",
+        offsite_city="ALLENTOWN", offsite_state="PA", offsite_zip="18101",
+        source_created_at="2026-09-01T10:00", source_updated_at="2026-09-19T10:00Z",
     )
 
     lot = client.get("/api/lots/copart/1").json()
@@ -114,6 +115,8 @@ def test_detail_carries_every_lot_column(client, conn):
     assert lot["seller_name"] == "INSURANCE CO"
     assert lot["location_zip"] == "94590"
     assert lot["location_country"] == "USA"
+    assert [lot[f"offsite_{k}"] for k in ("address", "city", "state", "zip")] == [
+        "645 W UNION ST", "ALLENTOWN", "PA", "18101"]
     assert lot["source_created_at"].startswith("2026-09-01T10:00")
     assert lot["source_updated_at"].startswith("2026-09-19T10:00")
     assert "attributes" not in lot and "row_hash" not in lot

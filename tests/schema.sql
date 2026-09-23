@@ -1,4 +1,4 @@
--- Copy of the `lots` table from cars-secrets-data-ingest (migrations 0001 + 0002), without
+-- Copy of the `lots` table from cars-secrets-data-ingest (migrations 0001, 0002 + 0007), without
 -- the foreign keys to ingest_files. The API only reads this table and cannot import the
 -- ingest migrations. ponytail: re-copy when the ingest adds a column the API exposes.
 CREATE TABLE lots (
@@ -40,6 +40,10 @@ CREATE TABLE lots (
     location_state      text,
     location_zip        text,
     location_country    text,
+    offsite_address     text,
+    offsite_city        text,
+    offsite_state       text,
+    offsite_zip         text,
     seller_name         text,
     image_url           text,
     thumbnail_url       text,
