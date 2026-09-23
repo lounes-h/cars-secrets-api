@@ -5,6 +5,7 @@ tests/schema.sql, a copy of the ingest repo's DDL."""
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -58,6 +59,10 @@ class FakeMailer:
         body = self.sent[-1][2]
         start = body.index(f"{path}?token=") + len(f"{path}?token=")
         return body[start:].split()[0]
+
+    def last_code(self) -> str:
+        """The six-digit confirmation code in the last mail."""
+        return re.search(r"\b[0-9]{6}\b", self.sent[-1][2]).group()
 
 
 @pytest.fixture

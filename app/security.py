@@ -1,6 +1,8 @@
-"""Password hashing, opaque tokens, breached-password check and captcha verification."""
+"""Password hashing, opaque tokens, email codes, breached-password check and captcha
+verification."""
 
 import hashlib
+import hmac
 import secrets
 
 import httpx
@@ -34,6 +36,20 @@ def new_token() -> str:
 
 def token_hash(token: str) -> bytes:
     return hashlib.sha256(token.encode()).digest()
+
+
+CODE_DIGITS = 6
+
+
+def new_code() -> str:
+    """A uniformly random six-digit code, leading zeros included."""
+    return f"{secrets.randbelow(10 ** CODE_DIGITS):0{CODE_DIGITS}d}"
+
+
+def code_hash(key: bytes, user_id: object, code: str) -> bytes:
+    """Keyed and bound to the user: a stolen hash is useless without the key, and a code
+    cannot be replayed against another account."""
+    return hmac.new(key, f"{user_id}:{code}".encode(), hashlib.sha256).digest()
 
 
 def password_is_breached(password: str, http: httpx.Client) -> bool:

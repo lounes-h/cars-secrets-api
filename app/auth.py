@@ -156,23 +156,67 @@ def register(body: RegisterIn, request: Request, conn: RwConn) -> dict[str, bool
     user = accounts.create_user(
         conn, email=email, first_name=body.first_name.strip(), last_name=body.last_name.strip(),
         phone=phone, password_hash=security.hash_password(body.password), terms_accepted=True)
-    token = accounts.create_token(conn, user["id"], "verify_email", s.verify_token_seconds)
-    mail_allowed(request, conn, "verify", email)
-    mailer.send(email, *mail.verification_mail(s.web_url, token))
+    send_code(request, conn, user)
     return {"ok": True}
 
 
-class TokenIn(BaseModel):
-    token: str
+def send_code(request: Request, conn: psycopg.Connection, user: dict[str, Any]) -> None:
+    """Mails a new confirmation code, replacing the last one, unless one went out less than a
+    minute ago or the address has had its share of mail. Callers answer the same either way."""
+    s = request.app.state.settings
+    if (accounts.email_code_sent_within(conn, user["id"], s.verify_code_resend_seconds)
+            or not mail_allowed(request, conn, "verify", user["email"])):
+        return
+    code = security.new_code()
+    accounts.save_email_code(conn, user["id"],
+                             security.code_hash(request.app.state.code_key, user["id"], code),
+                             s.verify_code_seconds)
+    request.app.state.mailer.send(user["email"],
+                                  *mail.verification_mail(code, s.verify_code_seconds // 60))
+
+
+# Six ASCII digits; `\d` would also accept other scripts' digits.
+Code = Annotated[str, Field(pattern=r"^[0-9]{6}$")]
+
+
+class VerifyEmailIn(BaseModel):
+    email: Email
+    code: Code
+    remember: bool = False   # carried over when the code step interrupts a login
 
 
 @router.post("/verify-email")
-def verify_email(body: TokenIn, conn: RwConn) -> dict[str, bool]:
-    user_id = accounts.consume_token(conn, body.token, "verify_email")
-    if user_id is None:
-        raise error(400, "invalid_token", "This link is invalid or has expired.")
-    accounts.mark_verified(conn, user_id)
-    return {"ok": True}
+def verify_email(body: VerifyEmailIn, request: Request, conn: RwConn) -> dict[str, Any]:
+    """Confirms the address with the mailed code and signs the dealer in: the code proves they
+    own the inbox, which is all a password reset would ask for anyway.
+
+    Every failure is the same `400 invalid_code`, whether the address is unknown, already
+    confirmed, has no live code or got the digits wrong, so it reveals nothing about accounts.
+    Each code allows `verify_code_attempts` guesses; wrong guesses are also counted per address
+    and per client, and past either limit all guesses are refused for the throttle window."""
+    s = request.app.state.settings
+    email = accounts.normalize_email(body.email)
+    keys = (f"code:email:{email}", f"code:ip:{client_ip(request)}")
+    limits = (s.code_failures_per_email, s.code_failures_per_ip)
+    if any(accounts.throttle_count(conn, k, s.throttle_window_seconds) >= n
+           for k, n in zip(keys, limits, strict=True)):
+        raise error(429, "too_many_attempts",
+                    "Too many incorrect codes. Wait 15 minutes, then request a new code.")
+    user = accounts.user_by_email(conn, email)
+    pending = user is not None and user["email_verified_at"] is None
+    stored = (accounts.spend_email_code_attempt(conn, user["id"], s.verify_code_attempts)
+              if pending else None)
+    # Hashed even when there is nothing to compare with, so no failure skips the HMAC.
+    given = security.code_hash(request.app.state.code_key, user["id"] if user else email,
+                               body.code)
+    if not (stored and hmac.compare_digest(stored, given)
+            and accounts.consume_email_code(conn, user["id"], stored)):
+        for k in keys:
+            accounts.throttle_hit(conn, k)
+        raise error(400, "invalid_code", "That code is incorrect or has expired. Check the "
+                    "latest email we sent, or request a new code.")
+    accounts.mark_verified(conn, user["id"])
+    return issue_session(request, conn, user["id"], remember=body.remember)
 
 
 class EmailIn(BaseModel):
@@ -183,12 +227,9 @@ class EmailIn(BaseModel):
 @router.post("/resend-verification")
 def resend_verification(body: EmailIn, request: Request, conn: RwConn) -> dict[str, bool]:
     require_captcha(request, body.captcha_token)
-    s, mailer = request.app.state.settings, request.app.state.mailer
     user = accounts.user_by_email(conn, body.email)
-    if (user and user["email_verified_at"] is None
-            and mail_allowed(request, conn, "verify", user["email"])):
-        token = accounts.create_token(conn, user["id"], "verify_email", s.verify_token_seconds)
-        mailer.send(user["email"], *mail.verification_mail(s.web_url, token))
+    if user and user["email_verified_at"] is None:
+        send_code(request, conn, user)
     return {"ok": True}
 
 
@@ -218,7 +259,10 @@ def login(body: LoginIn, request: Request, conn: RwConn) -> dict[str, Any]:
             accounts.throttle_hit(conn, k)
         raise error(401, "invalid_credentials", "Incorrect email or password.")
     if user["email_verified_at"] is None:
-        raise error(403, "email_unverified", "Confirm your email address before signing in.")
+        # The password is right, so this is the owner: send a code to finish the confirmation.
+        send_code(request, conn, user)
+        raise error(403, "email_unverified", "Confirm your email address before signing in: "
+                    "enter the code we emailed you.")
     return issue_session(request, conn, user["id"], remember=body.remember)
 
 

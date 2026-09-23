@@ -61,16 +61,19 @@ recently come first, which is what a dealer wants to look at.
 | `users` | email (lowercased, unique), names, phone (E.164), Argon2id hash (NULL for social-only), `email_verified_at`, `terms_accepted_at` |
 | `identities` | `(provider, subject)` → user, for Google and Apple sign-in |
 | `sessions` | sha256 of the bearer token, `remember`, sliding `expires_at`, `revoked_at` |
-| `tokens` | sha256 of email verification / password reset tokens, purpose, expiry, `used_at` |
+| `tokens` | sha256 of password reset tokens, purpose, expiry, `used_at` |
+| `email_codes` | one live confirmation code per user: HMAC of the code, `attempts`, `created_at`, expiry |
 | `oauth_states` | state → provider, PKCE verifier, nonce, `redirect_to`; deleted when used |
-| `throttle` | one row per counted event (`login:email:…`, `login:ip:…`) |
+| `throttle` | one row per counted event (`login:email:…`, `login:ip:…`, `code:email:…`, `code:ip:…`, `mail:…`) |
 
 ## Auth flows
 
-- **Register** → user row (unverified) + `verify_email` token → mail with
-  `WEB_URL/verify-email?token=…`. An existing address gets an "account exists" mail instead,
-  and the response is identical. **Verify** consumes the token. Login refuses unverified
-  accounts with `403 email_unverified`; **resend-verification** issues a new token.
+- **Register** → user row (unverified) + a six-digit code (`auth.send_code`) mailed to the
+  address, with no link. An existing address gets an "account exists" mail instead, and the
+  response is identical. **Verify** takes `{email, code}`, confirms the address and returns a
+  session like login does. A new code replaces the last one; **resend-verification** and a
+  login with the right password on an unconfirmed account both send one (at most one a
+  minute), and that login still answers `403 email_unverified`.
 - **Login** counts failures per email and per client IP; past the limits it demands a
   Turnstile token (`429 captcha_required`). Success returns a session token; the web server
   stores it in a cookie and sends it back as a bearer. `remember` picks a 30-day session

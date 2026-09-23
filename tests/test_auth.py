@@ -25,10 +25,17 @@ def login(client, password="long-enough-pw", **extra):
                        json={"email": "dana@example.com", "password": password, **extra})
 
 
+def verify(client, code, email="dana@example.com", **kwargs):
+    return client.post("/api/auth/verify-email", json={"email": email, "code": code}, **kwargs)
+
+
+def wrong(code: str) -> str:
+    return f"{(int(code) + 1) % 1_000_000:06d}"
+
+
 def verified_user(client, mailer):
     assert register(client).status_code == 200
-    token = mailer.last_link("/verify-email")
-    assert client.post("/api/auth/verify-email", json={"token": token}).status_code == 200
+    assert verify(client, mailer.last_code()).status_code == 200
 
 
 def query(url: str) -> dict[str, str]:
@@ -46,9 +53,12 @@ def test_register_verify_login_me(client, mailer, conn):
     assert login(client).status_code == 403
     assert login(client).json()["detail"]["code"] == "email_unverified"
 
-    token = mailer.last_link("/verify-email")
-    assert client.post("/api/auth/verify-email", json={"token": token}).status_code == 200
-    assert client.post("/api/auth/verify-email", json={"token": token}).status_code == 400
+    code = mailer.last_code()
+    r = verify(client, code, email="DANA@example.com ")
+    assert r.status_code == 200
+    me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {r.json()['token']}"})
+    assert me.json()["email_verified"] is True, "the code signs the dealer in"
+    assert verify(client, code).json()["detail"]["code"] == "invalid_code", "single use"
 
     r = login(client)
     assert r.status_code == 200
@@ -155,7 +165,8 @@ def test_logout_revokes_the_session(client, mailer):
     assert client.get("/api/auth/me", headers=headers).status_code == 401
 
 
-def test_resend_verification(client, mailer):
+def test_resend_verification(client, mailer, settings):
+    settings.verify_code_resend_seconds = 0
     register(client)
     n = len(mailer.sent)
     assert client.post("/api/auth/resend-verification",
@@ -170,6 +181,7 @@ def test_an_address_cannot_be_mailed_over_and_over(client, mailer, settings):
     """Anyone can name any address here, so the number of mails it can trigger is capped —
     without telling the caller anything: the answer stays {"ok": true}."""
     settings.mails_per_email = 2
+    settings.verify_code_resend_seconds = 0
     register(client)                      # the verification mail itself counts as one
     n = len(mailer.sent)
     resend = lambda: client.post("/api/auth/resend-verification",  # noqa: E731
@@ -314,3 +326,104 @@ def test_apple_first_sign_in_takes_the_posted_name(client, settings, monkeypatch
     row = conn.execute("SELECT first_name, last_name, email_verified_at FROM app.users").fetchone()
     assert (row["first_name"], row["last_name"]) == ("Dana", "Lee")
     assert row["email_verified_at"] is not None
+
+
+# --- email confirmation codes -----------------------------------------------------------------
+
+def test_the_confirmation_mail_holds_a_code_and_no_link(client, mailer, conn):
+    register(client)
+    to, subject, body = mailer.sent[-1]
+    code = mailer.last_code()
+    assert to == "dana@example.com" and code not in subject and "http" not in body
+    row = conn.execute("SELECT code_hash, attempts FROM app.email_codes").fetchone()
+    assert code.encode() not in bytes(row["code_hash"]) and row["attempts"] == 0
+
+
+@pytest.mark.parametrize("code", ["12345", "1234567", "12a456", "", "١٢٣٤٥٦", " 123456"])
+def test_verify_rejects_malformed_codes(client, code):
+    assert verify(client, code).status_code == 422
+
+
+def test_verify_answers_the_same_for_every_failure(client, mailer, conn):
+    """Unknown address, wrong digits and an already confirmed account are indistinguishable."""
+    register(client)
+    code = mailer.last_code()
+    answers = [verify(client, wrong(code)).json(),
+               verify(client, code, "nobody@example.com").json()]
+    assert verify(client, code).status_code == 200
+    answers.append(verify(client, code).json())
+    assert all(a == answers[0] for a in answers) and answers[0]["detail"]["code"] == "invalid_code"
+
+
+def test_a_code_allows_five_guesses_then_dies(client, mailer):
+    register(client)
+    code = mailer.last_code()
+    for _ in range(5):
+        assert verify(client, wrong(code)).status_code == 400
+    assert verify(client, code).status_code == 400, "even the right code is refused now"
+
+
+def test_an_expired_code_is_refused(client, mailer, conn):
+    register(client)
+    conn.execute("UPDATE app.email_codes SET expires_at = now() - interval '1 second'")
+    assert verify(client, mailer.last_code()).status_code == 400
+
+
+def test_a_new_code_replaces_the_last(client, mailer, conn):
+    register(client)
+    first = mailer.last_code()
+    verify(client, wrong(first))
+    conn.execute("UPDATE app.email_codes SET created_at = now() - interval '2 minutes'")
+    client.post("/api/auth/resend-verification", json={"email": "dana@example.com"})
+    second = mailer.last_code()
+    assert conn.execute("SELECT attempts FROM app.email_codes").fetchone()["attempts"] == 0
+    if second != first:
+        assert verify(client, first).status_code == 400
+    assert verify(client, second).status_code == 200
+
+
+def test_wrong_codes_lock_the_address(client, mailer, settings):
+    settings.verify_code_attempts = 100
+    register(client)
+    code = mailer.last_code()
+    for _ in range(settings.code_failures_per_email):
+        assert verify(client, wrong(code)).status_code == 400
+    r = verify(client, code)
+    assert r.status_code == 429 and r.json()["detail"]["code"] == "too_many_attempts"
+
+
+def test_wrong_codes_lock_the_client(client, mailer, settings):
+    register(client)
+    code = mailer.last_code()
+    for n in range(settings.code_failures_per_ip):
+        verify(client, "000000", f"nobody{n}@example.com", headers=INTERNAL)
+    assert verify(client, code, headers=INTERNAL).status_code == 429
+    # Another client is not affected.
+    other = {**INTERNAL, "X-Client-IP": "8.8.8.8"}
+    assert verify(client, code, headers=other).status_code == 200
+
+
+def test_resending_waits_a_minute_between_codes(client, mailer, conn):
+    register(client)
+    n = len(mailer.sent)
+    resend = lambda: client.post("/api/auth/resend-verification",  # noqa: E731
+                                 json={"email": "dana@example.com"})
+    assert resend().json() == {"ok": True} and len(mailer.sent) == n
+    conn.execute("UPDATE app.email_codes SET created_at = now() - interval '61 seconds'")
+    assert resend().json() == {"ok": True} and len(mailer.sent) == n + 1
+
+
+def test_signing_in_unconfirmed_sends_a_code_only_with_the_right_password(client, mailer, conn):
+    register(client)
+    conn.execute("UPDATE app.email_codes SET created_at = now() - interval '2 minutes'")
+    n = len(mailer.sent)
+    assert login(client, password="wrong-password").status_code == 401
+    assert len(mailer.sent) == n
+    r = login(client)
+    assert r.status_code == 403 and r.json()["detail"]["code"] == "email_unverified"
+    assert len(mailer.sent) == n + 1
+    r = client.post("/api/auth/verify-email", json={"email": "dana@example.com",
+                                                    "code": mailer.last_code(), "remember": True})
+    left = datetime.fromisoformat(r.json()["expires_at"]) - datetime.now(UTC)
+    assert left > timedelta(days=29), "remember me survives the code step"
+    assert login(client).status_code == 200

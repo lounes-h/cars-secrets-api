@@ -13,7 +13,7 @@ uv run alembic upgrade head                              # creates the `app` sch
 uv run uvicorn app.main:app_factory --factory --reload   # http://localhost:8000/api/docs
 ```
 
-Without `SMTP_HOST`, verification and reset links are printed in the log. Without
+Without `SMTP_HOST`, confirmation codes and reset links are printed in the log. Without
 `TURNSTILE_SECRET`, the captcha is not enforced. Google and Apple sign-in answer
 `501 provider_not_configured` until their variables are set.
 
@@ -25,10 +25,10 @@ Without `SMTP_HOST`, verification and reset links are printed in the log. Withou
 | `GET /api/lots` | `{items, total}` of active lots, the most recently listed first. Filters: `q` (lot number, VIN, make or model prefix), `make`, `source`, `year_min`, `year_max`, `limit` (≤ 100), `offset` |
 | `GET /api/lots/{source}/{lot_number}` | One active lot, 404 otherwise |
 | `GET /api/lots/{source}/{lot_number}/images` | `{images: [{thumb, full}]}`: every photo the auction publishes for the lot, empty when it has none or is unreachable |
-| `POST /api/auth/register` | Always `{ok: true}`; sends a verification email (or an "account exists" hint) |
-| `POST /api/auth/verify-email` | Marks the address verified from the emailed token |
-| `POST /api/auth/resend-verification` | Always `{ok: true}` |
-| `POST /api/auth/login` | `{token, expires_at}`; `401`, `403 email_unverified`, `429 captcha_required` |
+| `POST /api/auth/register` | Always `{ok: true}`; mails a six-digit confirmation code (or an "account exists" hint) |
+| `POST /api/auth/verify-email` | `{email, code, remember?}` → `{token, expires_at}`: confirms the address and signs in; `400 invalid_code`, `429 too_many_attempts` |
+| `POST /api/auth/resend-verification` | Always `{ok: true}`; a new code at most once a minute |
+| `POST /api/auth/login` | `{token, expires_at}`; `401`, `403 email_unverified` (a new code is mailed), `429 captcha_required` |
 | `POST /api/auth/logout`, `GET /api/auth/me` | Bearer session |
 | `POST /api/auth/forgot-password` | Always `{ok: true}`; sends the reset link |
 | `POST /api/auth/reset-password` | Sets the password from the emailed token, revokes all sessions |

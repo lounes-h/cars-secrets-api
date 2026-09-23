@@ -83,7 +83,7 @@ Alembic, raw SQL, `app` schema only (`migrations/`, version table `app.alembic_v
 Tests sit in `tests/` and run against a real PostgreSQL. `tests/schema.sql` is a copy of the
 ingest's `lots` DDL (migrations 0001 + 0002); refresh it when the ingest adds a column the
 API exposes. Fixtures in `tests/conftest.py`: `conn` (fresh database), `settings`, `mailer`
-(captures messages, `last_link(path)` extracts a token), `http_handler` (set `.fn` to script
+(captures messages, `last_link(path)` extracts a token, `last_code()` the confirmation code), `http_handler` (set `.fn` to script
 Turnstile / HIBP / OAuth responses), `client` (`TestClient` over `create_app` with those
 fakes), `insert_lot`.
 
@@ -144,7 +144,7 @@ A code change is not considered complete until the relevant unit tests have been
 ## Current state
 
 Working: read-only lots (`/api/lots`), accounts (register with terms acceptance and optional
-E.164 phone, email verification, login with remember-me and captcha after repeated failures,
+E.164 phone, email confirmation by a six-digit code that also signs the dealer in, login with remember-me and captcha after repeated failures,
 logout, me, forgot / reset password), Google and Apple sign-in (built and tested with fakes;
 they need credentials in `.env` to be offered). Mail goes to the log until `SMTP_*` is set;
 the captcha is enforced only with `TURNSTILE_SECRET`. The only provider in the lot data is

@@ -1,6 +1,7 @@
 """Car's Secrets API: accounts and read-only vehicle auction data for the web app."""
 
 import logging
+import secrets
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from typing import Annotated
@@ -35,6 +36,7 @@ def create_app(settings: Settings | None = None, *, mailer: Mailer | None = None
                   openapi_url="/api/openapi.json")
     app.state.settings, app.state.pool, app.state.rw_pool = settings, pool, rw_pool
     app.state.mailer, app.state.http = mailer or make_mailer(settings), http
+    app.state.code_key = settings.email_code_secret.encode() or dev_code_key()
 
     def db() -> Iterator[psycopg.Connection]:
         with pool.connection() as conn:
@@ -56,6 +58,13 @@ def create_app(settings: Settings | None = None, *, mailer: Mailer | None = None
     app.include_router(public)
     app.include_router(api)
     return app
+
+
+def dev_code_key() -> bytes:
+    logging.getLogger(__name__).warning(
+        "EMAIL_CODE_SECRET is not set: confirmation codes use a random key that dies with this "
+        "process and is not shared between workers. Never run like this in production.")
+    return secrets.token_bytes(32)
 
 
 def app_factory() -> FastAPI:  # uvicorn --factory entrypoint

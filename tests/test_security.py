@@ -1,4 +1,5 @@
 import hashlib
+import logging
 
 import httpx
 
@@ -63,3 +64,29 @@ def test_captcha_verifies_with_cloudflare():
     client, _ = turnstile(False)
     assert not security.captcha_ok("tok", "secret", "1.2.3.4", client)
     assert not security.captcha_ok(None, "secret", "1.2.3.4", client)
+
+
+def test_codes_are_six_digits_and_spread():
+    codes = [security.new_code() for _ in range(2000)]
+    assert all(len(c) == 6 and c.isdigit() for c in codes)
+    assert len(set(codes)) > 1990 and any(c.startswith("0") for c in codes)
+
+
+def test_code_hash_is_keyed_and_bound_to_the_user():
+    h = security.code_hash(b"key", "user-1", "123456")
+    assert h == security.code_hash(b"key", "user-1", "123456")
+    assert h != security.code_hash(b"key", "user-2", "123456")
+    assert h != security.code_hash(b"other", "user-1", "123456")
+    assert h != security.code_hash(b"key", "user-1", "123457")
+
+
+def test_the_code_key_comes_from_the_secret_or_a_warned_random(caplog, settings):
+    from app.main import create_app
+
+    settings.email_code_secret = "s" * 32
+    assert create_app(settings).state.code_key == b"s" * 32
+    settings.email_code_secret = ""
+    with caplog.at_level(logging.WARNING, logger="app.main"):
+        first, second = create_app(settings).state.code_key, create_app(settings).state.code_key
+    assert len(first) == 32 and first != second
+    assert "EMAIL_CODE_SECRET is not set" in caplog.text

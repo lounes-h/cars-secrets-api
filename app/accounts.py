@@ -91,7 +91,7 @@ def revoke_all_sessions(conn: psycopg.Connection, user_id: UUID) -> None:
                  "WHERE user_id = %s AND revoked_at IS NULL", (user_id,))
 
 
-# --- one-time tokens (email verification, password reset) -------------------------------------
+# --- one-time tokens (password reset) ---------------------------------------------------------
 
 def create_token(conn: psycopg.Connection, user_id: UUID, purpose: str, ttl_seconds: int) -> str:
     token = new_token()
@@ -111,6 +111,49 @@ def consume_token(conn: psycopg.Connection, token: str, purpose: str) -> UUID | 
         (token_hash(token), purpose),
     ).fetchone()
     return row["user_id"] if row else None
+
+
+# --- email confirmation codes -----------------------------------------------------------------
+
+def save_email_code(conn: psycopg.Connection, user_id: UUID, code_hash: bytes,
+                    ttl_seconds: int) -> None:
+    """One live code per user: a new one replaces the last and its spent attempts."""
+    conn.execute(
+        """INSERT INTO app.email_codes (user_id, code_hash, expires_at)
+           VALUES (%s, %s, now() + make_interval(secs => %s))
+           ON CONFLICT (user_id) DO UPDATE
+           SET code_hash = excluded.code_hash, attempts = 0, created_at = now(),
+               expires_at = excluded.expires_at""",
+        (user_id, code_hash, ttl_seconds),
+    )
+
+
+def email_code_sent_within(conn: psycopg.Connection, user_id: UUID, seconds: int) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM app.email_codes WHERE user_id = %s "
+        "AND created_at > now() - make_interval(secs => %s)", (user_id, seconds),
+    ).fetchone() is not None
+
+
+def spend_email_code_attempt(conn: psycopg.Connection, user_id: UUID,
+                             max_attempts: int) -> bytes | None:
+    """Uses up one guess and returns the stored hash, or None when there is no live code
+    (none, expired, or out of guesses). The increment is one statement, so parallel guesses
+    cannot share an attempt."""
+    row = conn.execute(
+        """UPDATE app.email_codes SET attempts = attempts + 1
+           WHERE user_id = %s AND attempts < %s AND expires_at > now()
+           RETURNING code_hash""", (user_id, max_attempts),
+    ).fetchone()
+    return bytes(row["code_hash"]) if row else None
+
+
+def consume_email_code(conn: psycopg.Connection, user_id: UUID, code_hash: bytes) -> bool:
+    """Deletes the code if it is still the one checked; only one caller can win."""
+    return conn.execute(
+        "DELETE FROM app.email_codes WHERE user_id = %s AND code_hash = %s RETURNING user_id",
+        (user_id, code_hash),
+    ).fetchone() is not None
 
 
 # --- throttling -------------------------------------------------------------------------------

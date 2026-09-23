@@ -6,12 +6,16 @@ from app.config import Settings
 
 
 def test_message_builders_link_to_the_web_app():
-    subject, body = mail.verification_mail("https://cars.test", "tok-1")
-    assert "https://cars.test/verify-email?token=tok-1" in body
     subject, body = mail.reset_mail("https://cars.test", "tok-2")
     assert "https://cars.test/reset-password?token=tok-2" in body
     subject, body = mail.existing_account_mail("https://cars.test")
     assert "https://cars.test/forgot-password" in body
+
+
+def test_verification_mail_carries_the_code_but_not_in_its_subject():
+    subject, body = mail.verification_mail("042917", 10)
+    assert "042917" in body and "042917" not in subject
+    assert "10 minutes" in body and "http" not in body
 
 
 def test_log_mailer_logs_the_message(caplog):
