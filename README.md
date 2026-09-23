@@ -40,6 +40,7 @@ Without `SMTP_HOST`, confirmation codes and reset links are printed in the log. 
 ```bash
 uv run ruff check app tests migrations
 uv run pytest             # starts a throwaway Postgres via Docker
+uv run pytest --cov       # the same, failing below the 95 % coverage minimum
 TEST_DATABASE_URL=postgresql://… uv run pytest   # reuse a Postgres (its public and app schemas are wiped)
 uv run alembic revision -m "describe change"     # new migration under migrations/versions/
 ```
