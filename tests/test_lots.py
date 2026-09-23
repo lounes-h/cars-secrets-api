@@ -89,6 +89,36 @@ def test_detail(client, conn):
     assert client.get("/api/lots/copart/404").status_code == 404
 
 
+def test_detail_carries_every_lot_column(client, conn):
+    """The lot page shows all of them, so none of the ingest's own columns may be dropped."""
+    insert_lot(
+        conn, "1", vehicle_type="AUTOMOBILE", engine="2.4L 4", cylinders="4", fuel_type="GAS",
+        transmission="AUTOMATIC", drive="FRONT", sale_status="PURE SALE", sale_date="2026-10-01",
+        yard_code="123", yard_name="CA - VALLEJO", seller_name="INSURANCE CO",
+        location_zip="94590", location_country="USA", source_created_at="2026-09-01T10:00",
+        source_updated_at="2026-09-19T10:00Z",
+    )
+
+    lot = client.get("/api/lots/copart/1").json()
+
+    assert lot["vehicle_type"] == "AUTOMOBILE"
+    assert lot["engine"] == "2.4L 4"
+    assert lot["cylinders"] == "4"
+    assert lot["fuel_type"] == "GAS"
+    assert lot["transmission"] == "AUTOMATIC"
+    assert lot["drive"] == "FRONT"
+    assert lot["sale_status"] == "PURE SALE"
+    assert lot["sale_date"] == "2026-10-01"
+    assert lot["yard_code"] == "123"
+    assert lot["yard_name"] == "CA - VALLEJO"
+    assert lot["seller_name"] == "INSURANCE CO"
+    assert lot["location_zip"] == "94590"
+    assert lot["location_country"] == "USA"
+    assert lot["source_created_at"].startswith("2026-09-01T10:00")
+    assert lot["source_updated_at"].startswith("2026-09-19T10:00")
+    assert "attributes" not in lot and "row_hash" not in lot
+
+
 def test_pool_connections_are_read_only(db_url):
     with (
         make_pool(db_url) as pool,

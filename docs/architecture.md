@@ -34,10 +34,12 @@ the token it keeps in its cookie.
 
 ## Lots
 
-`Lot` is an explicit contract: the typed columns the web app needs, `model_group` exposed as
-`model`, plus `listing_url` built from `LISTING_URLS[source]` (Copart:
-`https://www.copart.com/lot/<n>`, `null` for unknown sources). The `attributes` JSONB that
-holds every raw export column is not exposed. Amounts are numbers (JSON), not strings.
+`Lot` is an explicit contract: every canonical column of the ingest's `lots` table, with
+`model_group` exposed as `model`, plus `listing_url` built from `LISTING_URLS[source]`
+(Copart: `https://www.copart.com/lot/<n>`, `null` for unknown sources). The lot page shows
+all of them, so a column the ingest adds belongs in `COLUMNS` and `Lot` too. The ingest's
+bookkeeping is not exposed: `attributes` (the raw export columns), `row_hash`, `last_seen_at`,
+`removed_at` and the file ids. Amounts are numbers (JSON), not strings.
 
 `/{source}/{lot_number}/images` lists a lot's photos. Copart's public photo list is fetched
 through `app.state.http`, always from the URL stored for that lot (`image_url`) and never from

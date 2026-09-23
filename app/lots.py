@@ -1,6 +1,6 @@
 """Read-only access to auction lots (the ingest repo's `lots` table)."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -17,11 +17,16 @@ LISTING_URLS = {"copart": "https://www.copart.com/lot/{lot_number}"}
 IMAGE_API_HOST = "inventoryv2.copart.io"
 IMAGE_HOST = "cs.copart.com"
 
+# Every canonical column of the ingest's `lots` table except its bookkeeping (attributes,
+# row_hash, last_seen_at, removed_at, file ids): the lot page shows all of them.
 COLUMNS = """source, lot_number, year, make, model_group AS model, model_detail, trim, vin,
-    body_style, color, damage_primary, damage_secondary, title_type, title_state, has_keys,
+    body_style, color, vehicle_type, engine, cylinders, fuel_type, transmission, drive,
+    damage_primary, damage_secondary, title_type, title_state, has_keys,
     odometer, odometer_brand, runs_drives, est_retail_value, repair_cost, high_bid,
-    buy_it_now_price, currency, sale_at, yard_name, location_city, location_state,
-    thumbnail_url, image_url, first_seen_at, last_changed_at"""
+    buy_it_now_price, currency, sale_status, sale_date, sale_at, yard_code, yard_name,
+    seller_name, location_city, location_state, location_zip, location_country,
+    thumbnail_url, image_url, source_created_at, source_updated_at,
+    first_seen_at, last_changed_at"""
 
 
 class Lot(BaseModel):
@@ -35,6 +40,12 @@ class Lot(BaseModel):
     vin: str | None
     body_style: str | None
     color: str | None
+    vehicle_type: str | None
+    engine: str | None
+    cylinders: str | None
+    fuel_type: str | None
+    transmission: str | None
+    drive: str | None
     damage_primary: str | None
     damage_secondary: str | None
     title_type: str | None
@@ -48,12 +59,20 @@ class Lot(BaseModel):
     high_bid: float | None
     buy_it_now_price: float | None
     currency: str | None
+    sale_status: str | None
+    sale_date: date | None
     sale_at: datetime | None
+    yard_code: str | None
     yard_name: str | None
+    seller_name: str | None
     location_city: str | None
     location_state: str | None
+    location_zip: str | None
+    location_country: str | None
     thumbnail_url: str | None
     image_url: str | None
+    source_created_at: datetime | None
+    source_updated_at: datetime | None
     listing_url: str | None
     first_seen_at: datetime
     last_changed_at: datetime
