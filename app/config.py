@@ -17,9 +17,20 @@ class Settings(BaseSettings):
 
     session_remember_seconds: int = 30 * 24 * 3600
     session_idle_seconds: int = 12 * 3600
-    verify_token_seconds: int = 24 * 3600
     reset_token_seconds: int = 3600
     oauth_state_seconds: int = 600
+
+    # Email confirmation codes: six digits, valid for 10 minutes, 5 guesses each, one new code
+    # a minute at most. Wrong codes are also counted per address and per client over the
+    # throttle window; past either limit every guess is refused until the window passes.
+    verify_code_seconds: int = 600
+    verify_code_attempts: int = 5
+    verify_code_resend_seconds: int = 60
+    code_failures_per_email: int = 10
+    code_failures_per_ip: int = 20
+    # HMAC key for stored codes, so a leaked table cannot be brute-forced offline (a million
+    # candidates). 32+ random chars. Empty: a random key per process (development only).
+    email_code_secret: str = Field(default="", repr=False)
 
     # Login failures in the window before a captcha is required.
     login_failures_per_email: int = 3

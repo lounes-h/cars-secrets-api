@@ -65,10 +65,10 @@ def test_session_use_slides_expiry(conn, user):
 
 
 def test_one_time_tokens(conn, user):
-    token = accounts.create_token(conn, user["id"], "verify_email", 60)
-    assert accounts.consume_token(conn, token, "reset_password") is None   # wrong purpose
-    assert accounts.consume_token(conn, token, "verify_email") == user["id"]
-    assert accounts.consume_token(conn, token, "verify_email") is None     # single use
+    token = accounts.create_token(conn, user["id"], "reset_password", 60)
+    assert accounts.consume_token(conn, token, "verify_email") is None     # wrong purpose
+    assert accounts.consume_token(conn, token, "reset_password") == user["id"]
+    assert accounts.consume_token(conn, token, "reset_password") is None   # single use
     expired = accounts.create_token(conn, user["id"], "reset_password", -1)
     assert accounts.consume_token(conn, expired, "reset_password") is None
 

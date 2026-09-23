@@ -38,17 +38,21 @@ class SmtpMailer:
 def make_mailer(settings: Settings) -> Mailer:
     if settings.smtp_host:
         return SmtpMailer(settings)
-    # The log then holds working verification and password-reset links: development only.
-    log.warning("SMTP_HOST is not set: emails, including password reset links, are written to "
-                "the log. Never run like this in production.")
+    # The log then holds working confirmation codes and reset links: development only.
+    log.warning("SMTP_HOST is not set: emails, including confirmation codes and password reset "
+                "links, are written to the log. Never run like this in production.")
     return LogMailer()
 
 
-def verification_mail(web_url: str, token: str) -> tuple[str, str]:
-    return "Confirm your email address", (
-        "Welcome to Car's Secrets.\n\nConfirm your email address by opening this link "
-        f"(valid for 24 hours):\n\n{web_url}/verify-email?token={token}\n\n"
-        "If you did not create an account, ignore this message."
+def verification_mail(code: str, minutes: int) -> tuple[str, str]:
+    # The code stays out of the subject, so it does not show on a locked phone's notifications.
+    return "Your confirmation code", (
+        "Welcome to Car's Secrets.\n\nEnter this code to confirm your email address:\n\n"
+        f"    {code}\n\n"
+        f"It expires in {minutes} minutes and works once. Never share it: nobody from "
+        "Car's Secrets will ever ask you for it.\n\n"
+        "If you did not create an account, ignore this message: nothing happens without "
+        "the code."
     )
 
 

@@ -8,7 +8,8 @@
 - Only typed lot columns are served, never the raw `attributes` export data. User responses
   carry id, email, names, phone and the verified flag; never hashes or tokens.
 - Register, resend-verification and forgot-password answer the same `200 {"ok": true}` whether
-  or not the address exists. Login answers a generic `401` for unknown addresses and wrong
+  or not the address exists. Verify-email answers the same `400 invalid_code` for an unknown
+  address, a confirmed one, a missing or expired code and wrong digits. Login answers a generic `401` for unknown addresses and wrong
   passwords, after verifying against a dummy hash so timing does not differ.
 
 ## Sessions
@@ -44,11 +45,33 @@ The client IP is `X-Client-IP` only when the request also carries `X-Internal-Ke
 `INTERNAL_API_KEY` (compared in constant time); otherwise the TCP peer. The web server sets
 both, so throttling applies to visitors and not to the web server's address.
 
-## Email tokens
+## Email confirmation codes
 
-Verification (24 h) and reset (1 h) tokens are random, stored hashed, single use, bound to a
-purpose. Links point at the web app, whose pages need a click before consuming a token, so
-mail scanners that prefetch links do not.
+- Six digits from `secrets.randbelow` (a million values), valid 10 minutes, single use; one
+  live code per user, and a new one replaces the last with a fresh attempt count.
+- Stored as HMAC-SHA256 over `user_id:code` keyed with `EMAIL_CODE_SECRET`: without the key a
+  leaked table cannot be brute-forced offline, and a code is bound to its account. Without the
+  variable each process makes a random key (development only). Compared in constant time, and
+  hashed for unknown addresses too. A pending account still costs one more `UPDATE` than an
+  unknown address, a timing difference far below network noise; the answer is identical.
+- Guessing is bounded three ways: 5 guesses per code (spent by an atomic `UPDATE`, so parallel
+  requests cannot share one), then 10 wrong codes per address and 20 per client over 15
+  minutes, after which every guess gets `429 too_many_attempts`. New codes are capped by the
+  mail limits below and by one a minute per account. That leaves an attacker about 10 guesses
+  per address per 15 minutes against a million values. The price of the per-address lock is
+  that someone can hold back a stranger's confirmation for 15 minutes; it cannot take over
+  the account.
+- A right code signs the dealer in (12 hours idle, or 30 days with `remember`): it proves the inbox, which is all a
+  password reset asks for. A login with the right password on an unconfirmed account mails a
+  new code, so the owner is never stuck.
+- The code is in the mail's body, never its subject (lock-screen notifications), and the mail
+  holds no link, so scanners that open links cannot use it.
+
+## Reset tokens
+
+Reset tokens (1 h) are random, stored hashed, single use, bound to a purpose. Links point at
+the web app, whose page needs a click before consuming a token, so mail scanners that
+prefetch links do not.
 
 ## Social login
 
@@ -69,7 +92,7 @@ names.
 
 ## Secrets
 
-`DATABASE_URL`, `INTERNAL_API_KEY`, `TURNSTILE_SECRET`, `SMTP_PASSWORD`, `GOOGLE_CLIENT_SECRET`
+`DATABASE_URL`, `INTERNAL_API_KEY`, `EMAIL_CODE_SECRET`, `TURNSTILE_SECRET`, `SMTP_PASSWORD`, `GOOGLE_CLIENT_SECRET`
 and `APPLE_PRIVATE_KEY` live in `.env`, which is git-ignored; `.env.example` holds the names
 only. Request bodies and tokens are never logged; the log mailer (development only) prints
-verification and reset links.
+confirmation codes and reset links.
