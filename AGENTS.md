@@ -161,7 +161,9 @@ E.164 phone, email confirmation by a six-digit code that also signs the dealer i
 logout, me, forgot / reset password), Google and Apple sign-in (built and tested with fakes;
 they need credentials in `.env` to be offered). Mail goes to the log until `SMTP_*` is set;
 the captcha is enforced only with `TURNSTILE_SECRET`. The only provider in the lot data is
-Copart.
+Copart. Each lot carries `predicted_final_price`, estimated by the ingest's model. That model is
+trained on generated sold prices until real ones exist, and the field is `null` until a model is
+deployed.
 
 Not done: terms of use and privacy policy documents, profile editing, email change, account
 deletion, MFA, saved lots, searches, alerts, deal analysis. CORS is not enabled; the web app

@@ -12,7 +12,7 @@ def lot_numbers(response) -> list[str]:
 
 def test_lists_active_lots_newest_first(client, conn):
     insert_lot(conn, "3", first_seen_at="2026-09-03T00:00Z")
-    insert_lot(conn, "1", first_seen_at="2026-09-05T00:00Z")
+    insert_lot(conn, "1", first_seen_at="2026-09-05T00:00Z", predicted_final_price=4250.5)
     insert_lot(conn, "9", first_seen_at="2026-09-01T00:00Z")
     insert_lot(conn, "2", first_seen_at="2026-09-09T00:00Z", removed_at="2026-09-18T00:00Z")
 
@@ -24,6 +24,8 @@ def test_lists_active_lots_newest_first(client, conn):
     first = response.json()["items"][0]
     assert first["model"] == "CAMRY"
     assert first["listing_url"] == "https://www.copart.com/lot/1"
+    assert first["predicted_final_price"] == 4250.5  # a JSON number
+    assert response.json()["items"][1]["predicted_final_price"] is None
     assert "attributes" not in first
 
 
@@ -72,7 +74,7 @@ def test_pagination(client, conn):
 
 
 def test_detail(client, conn):
-    insert_lot(conn, "1", odometer=54321.0, high_bid=2500)
+    insert_lot(conn, "1", odometer=54321.0, high_bid=2500, predicted_final_price=3175)
     insert_lot(conn, "2", removed_at="2026-09-18T00:00Z")
     insert_lot(conn, "3", source="iaai")
 
@@ -83,8 +85,10 @@ def test_detail(client, conn):
     assert lot["lot_number"] == "1"
     assert lot["odometer"] == 54321
     assert lot["high_bid"] == 2500
+    assert lot["predicted_final_price"] == 3175
     assert lot["listing_url"] == "https://www.copart.com/lot/1"
     assert client.get("/api/lots/iaai/3").json()["listing_url"] is None
+    assert client.get("/api/lots/iaai/3").json()["predicted_final_price"] is None  # not priced
     assert client.get("/api/lots/copart/2").status_code == 404  # removed
     assert client.get("/api/lots/copart/404").status_code == 404
 

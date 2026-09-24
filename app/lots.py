@@ -27,7 +27,7 @@ COLUMNS = """source, lot_number, year, make, model_group AS model, model_detail,
     seller_name, location_city, location_state, location_zip, location_country,
     offsite_address, offsite_city, offsite_state, offsite_zip,
     thumbnail_url, image_url, source_created_at, source_updated_at,
-    first_seen_at, last_changed_at"""
+    first_seen_at, last_changed_at, predicted_final_price"""
 
 
 class Lot(BaseModel):
@@ -82,6 +82,8 @@ class Lot(BaseModel):
     listing_url: str | None
     first_seen_at: datetime
     last_changed_at: datetime
+    # The ingest's model estimate of the final auction price; None until a model prices the lot.
+    predicted_final_price: float | None
 
 
 class LotPage(BaseModel):
