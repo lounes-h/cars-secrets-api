@@ -53,6 +53,7 @@ CREATE TABLE lots (
     first_seen_at       timestamptz NOT NULL,
     last_changed_at     timestamptz NOT NULL,
     removed_at          timestamptz,
+    predicted_final_price numeric,
     PRIMARY KEY (source, lot_number)
 );
 CREATE INDEX lots_listing ON lots (first_seen_at DESC, lot_number) WHERE removed_at IS NULL;

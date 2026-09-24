@@ -44,7 +44,9 @@ the token it keeps in its cookie.
 all of them, so a column the ingest adds belongs in `COLUMNS` and `Lot` too. The ingest's
 bookkeeping (`attributes`, the raw export columns; `row_hash`; `last_seen_at`; file ids) never
 reaches the API database, and `removed_at` is not exposed. Amounts are numbers (JSON), not
-strings.
+strings. `predicted_final_price` is the ingest's XGBoost estimate of the final auction price
+(`pricing.py` there), `null` until a model prices the lot. Its model is trained on generated sold
+prices for now, so treat it as an estimate: the web app labels it so.
 
 `/{source}/{lot_number}/images` lists a lot's photos. Copart's public photo list is fetched
 through `app.state.http`, always from the URL stored for that lot (`image_url`) and never from
