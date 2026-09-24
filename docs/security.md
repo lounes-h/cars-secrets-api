@@ -84,9 +84,12 @@ names.
 
 ## Database
 
-- Ingest tables are read through connections opened with `default_transaction_read_only=on`;
-  the `app` schema is written through a separate pool. A dedicated database role for the API
-  should still be created by the ingest repo before deploying beyond localhost.
+- The API has its own database. Its `public` tables (lots, filled by the ingest worker) are
+  read through connections opened with `default_transaction_read_only=on`; the `app` schema is
+  written through a separate pool. The ingest database is never reachable from the API, and
+  the lots copy carries no raw export data (`attributes`). Before deploying beyond localhost,
+  give the API a role that can only read `public` and write `app`, separate from the ingest
+  worker's role, and require TLS (`sslmode=require`) to a hosted database.
 - SQL is always parameterized. The only f-string SQL interpolates code constants (column lists
   and fixed WHERE fragments). LIKE patterns escape `\`, `%` and `_`.
 

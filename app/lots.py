@@ -1,4 +1,4 @@
-"""Read-only access to auction lots (the ingest repo's `lots` table)."""
+"""Read-only access to auction lots (the `lots` table the ingest worker keeps in step)."""
 
 from datetime import date, datetime
 from typing import Annotated, Any
@@ -17,8 +17,8 @@ LISTING_URLS = {"copart": "https://www.copart.com/lot/{lot_number}"}
 IMAGE_API_HOST = "inventoryv2.copart.io"
 IMAGE_HOST = "cs.copart.com"
 
-# Every canonical column of the ingest's `lots` table except its bookkeeping (attributes,
-# row_hash, last_seen_at, removed_at, file ids): the lot page shows all of them.
+# Every column of the API database's `lots` table except `removed_at`: the lot page shows all
+# of them. The ingest's bookkeeping (attributes, row hashes, file ids) never reaches it.
 COLUMNS = """source, lot_number, year, make, model_group AS model, model_detail, trim, vin,
     body_style, color, vehicle_type, engine, cylinders, fuel_type, transmission, drive,
     damage_primary, damage_secondary, title_type, title_state, has_keys,
