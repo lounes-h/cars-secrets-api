@@ -98,4 +98,5 @@ names.
 `DATABASE_URL`, `INTERNAL_API_KEY`, `EMAIL_CODE_SECRET`, `TURNSTILE_SECRET`, `SMTP_PASSWORD`, `GOOGLE_CLIENT_SECRET`
 and `APPLE_PRIVATE_KEY` live in `.env`, which is git-ignored; `.env.example` holds the names
 only. Request bodies and tokens are never logged; the log mailer (development only) prints
-confirmation codes and reset links.
+confirmation codes and reset links. Error alert mails carry the error type, method, route
+template and traceback (code, not request data): never the query string, body or headers.

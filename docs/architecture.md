@@ -99,6 +99,10 @@ recently come first, which is what a dealer wants to look at.
 token endpoints; `app.state.mailer` for email. Tests pass a `MockTransport` and a capturing
 mailer through `create_app(settings, mailer=..., http=...)`.
 
+An unhandled exception answers `500 internal_error` and, with `ALERT_EMAIL_TO` set, is mailed
+there with its traceback by the handler in `main.py`: once per error type and route template
+per `ALERT_EMAIL_INTERVAL_SECONDS` (in memory, per process), so an outage is one mail.
+
 ## Tests
 
 Tests run against a real Postgres (`TEST_DATABASE_URL`, or a testcontainers `postgres:17`).

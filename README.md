@@ -15,7 +15,9 @@ uv run alembic upgrade head                              # creates the `app` sch
 uv run uvicorn app.main:app_factory --factory --reload   # http://localhost:8000/api/docs
 ```
 
-Without `SMTP_HOST`, confirmation codes and reset links are printed in the log. Without
+Without `SMTP_HOST`, confirmation codes and reset links are printed in the log (see
+`.env.example` for Gmail). With `ALERT_EMAIL_TO`, an unhandled server error mails its
+traceback there, once an hour per route and error type. Without
 `TURNSTILE_SECRET`, the captcha is not enforced. Google and Apple sign-in answer
 `501 provider_not_configured` until their variables are set.
 

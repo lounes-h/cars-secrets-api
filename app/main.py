@@ -1,19 +1,24 @@
 """Car's Secrets API: accounts and read-only vehicle auction data for the web app."""
 
+import asyncio
 import logging
 import secrets
+import time
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from typing import Annotated
 
 import httpx
 import psycopg
-from fastapi import APIRouter, Depends, FastAPI
+from fastapi import APIRouter, Depends, FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from . import auth, lots
 from .config import Settings, get_settings
 from .db import make_pool
-from .mail import Mailer, make_mailer
+from .mail import Mailer, error_mail, make_mailer
+
+log = logging.getLogger(__name__)
 
 
 def create_app(settings: Settings | None = None, *, mailer: Mailer | None = None,
@@ -37,6 +42,27 @@ def create_app(settings: Settings | None = None, *, mailer: Mailer | None = None
     app.state.settings, app.state.pool, app.state.rw_pool = settings, pool, rw_pool
     app.state.mailer, app.state.http = mailer or make_mailer(settings), http
     app.state.code_key = settings.email_code_secret.encode() or dev_code_key()
+
+    alerted: dict[str, float] = {}  # failure -> when it was last mailed (monotonic)
+
+    @app.exception_handler(Exception)
+    async def server_error(request: Request, exc: Exception) -> JSONResponse:
+        """Mails the admin about an unhandled error; Starlette re-raises it afterwards, so it
+        is still logged. Keyed by route template, so an outage is one mail, not one per lot."""
+        route = getattr(request.scope.get("route"), "path", request.url.path)
+        where = f"{type(exc).__name__} in {request.method} {route}"
+        now = time.monotonic()
+        last = alerted.get(where)
+        if settings.alert_email_to and (
+                last is None or now - last >= settings.alert_email_interval_seconds):
+            alerted[where] = now
+            try:
+                await asyncio.to_thread(app.state.mailer.send, settings.alert_email_to,
+                                        *error_mail(where, exc))
+            except Exception:
+                log.exception("could not mail the error alert")
+        return JSONResponse(status_code=500, content={"detail": {
+            "code": "internal_error", "message": "Something went wrong. Please try again."}})
 
     def db() -> Iterator[psycopg.Connection]:
         with pool.connection() as conn:

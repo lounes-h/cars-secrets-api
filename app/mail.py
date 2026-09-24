@@ -2,6 +2,7 @@
 
 import logging
 import smtplib
+import traceback
 from email.message import EmailMessage
 from typing import Protocol
 
@@ -69,4 +70,13 @@ def existing_account_mail(web_url: str) -> tuple[str, str]:
         "Someone tried to register on Car's Secrets with this email address, but an account "
         f"already exists. You can sign in at {web_url}/login or reset your password at "
         f"{web_url}/forgot-password.\n\nIf that was not you, ignore this message."
+    )
+
+
+def error_mail(where: str, exc: BaseException) -> tuple[str, str]:
+    # The traceback shows code, not request data: no bodies, tokens or query strings.
+    return f"[Cars API] Server error: {where}", (
+        f"{where} failed with an unhandled error. Repeats of it are not mailed again until "
+        "ALERT_EMAIL_INTERVAL_SECONDS has passed; the API log has every occurrence.\n\n"
+        + "".join(traceback.format_exception(exc))
     )

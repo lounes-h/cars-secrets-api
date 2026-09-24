@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     smtp_username: str = ""
     smtp_password: str = Field(default="", repr=False)
     mail_from: str = "Car's Secrets <no-reply@localhost>"
+    # Unhandled server errors are mailed here, each distinct one at most once per interval.
+    # Empty: they are only logged.
+    alert_email_to: str = ""
+    alert_email_interval_seconds: int = 3600
 
     google_client_id: str = ""
     google_client_secret: str = Field(default="", repr=False)
