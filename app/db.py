@@ -5,9 +5,10 @@ from psycopg_pool import ConnectionPool
 
 
 def make_pool(database_url: str, *, read_only: bool = True) -> ConnectionPool:
-    """Connections to the shared database. The ingest tables are only ever read, so the
-    default pool opens every connection read-only: a stray write fails instead of touching
-    them. The `app` schema (accounts) is written through a second pool with read_only=False."""
+    """Connections to the API database. Its `public` tables (lots) belong to the ingest
+    worker, which keeps them in step, so the default pool opens every connection read-only: a
+    stray write fails instead of touching them. The `app` schema (accounts) is written
+    through a second pool with read_only=False."""
     kwargs = {"autocommit": True, "row_factory": dict_row}
     if read_only:
         kwargs["options"] = "-c default_transaction_read_only=on"

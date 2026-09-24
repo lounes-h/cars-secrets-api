@@ -1,4 +1,4 @@
-"""Migrations for the API-owned `app` schema. The ingest repo owns everything in `public`."""
+"""Migrations for the API-owned `app` schema. The ingest worker owns everything in `public`."""
 
 import os
 

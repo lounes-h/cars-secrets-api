@@ -90,7 +90,7 @@ def test_detail(client, conn):
 
 
 def test_detail_carries_every_lot_column(client, conn):
-    """The lot page shows all of them, so none of the ingest's own columns may be dropped."""
+    """The lot page shows all of them, so none of the synced columns may be dropped."""
     insert_lot(
         conn, "1", vehicle_type="AUTOMOBILE", engine="2.4L 4", cylinders="4", fuel_type="GAS",
         transmission="AUTOMATIC", drive="FRONT", sale_status="PURE SALE", sale_date="2026-10-01",

@@ -1,15 +1,19 @@
 # Architecture
 
 ```
-cars-secrets-data-ingest ──► PostgreSQL ◄── cars-secrets-api ◄── cars-secrets-web (server actions)
-                              public.*  read-only          │
-                              app.*     read/write ◄───────┘
+ingest database ── ingest worker ──► API database ◄── cars-secrets-api ◄── cars-secrets-web
+ (every lot ever,    (after each file   public.*  read-only       │        (server actions)
+  full history)       + every 15 min)   app.*     read/write ◄────┘
 ```
 
-One database, two schemas. The ingest repo owns `public` (`lots` and friends) and migrates
-it; this API only reads it, through a pool whose connections are opened with
-`default_transaction_read_only=on`. This API owns `app` (accounts) and migrates it with its
-own Alembic history (`migrations/`, version table `app.alembic_version`), through a second,
+The API has its own database, separate from the ingest's, with two schemas. The ingest
+worker owns `public`: it creates `lots` and `ingest_sync` and keeps `lots` in step with the
+ingest database, copying only the lots that changed, in one transaction per sync. `lots`
+holds every active lot, plus removed lots until their auction is over (sale time + 4 h), with
+only the served columns. So it stays around 200k rows instead of growing with every lot ever
+seen. This API only reads `public`, through a pool whose connections are opened with
+`default_transaction_read_only=on`. It owns `app` (accounts) and migrates it with its own
+Alembic history (`migrations/`, version table `app.alembic_version`), through a second,
 writable pool. The two never touch each other's tables.
 
 | Module (`app/`) | Responsibility |
@@ -34,12 +38,13 @@ the token it keeps in its cookie.
 
 ## Lots
 
-`Lot` is an explicit contract: every canonical column of the ingest's `lots` table, with
+`Lot` is an explicit contract: every column of the synced `lots` table, with
 `model_group` exposed as `model`, plus `listing_url` built from `LISTING_URLS[source]`
 (Copart: `https://www.copart.com/lot/<n>`, `null` for unknown sources). The lot page shows
 all of them, so a column the ingest adds belongs in `COLUMNS` and `Lot` too. The ingest's
-bookkeeping is not exposed: `attributes` (the raw export columns), `row_hash`, `last_seen_at`,
-`removed_at` and the file ids. Amounts are numbers (JSON), not strings.
+bookkeeping (`attributes`, the raw export columns; `row_hash`; `last_seen_at`; file ids) never
+reaches the API database, and `removed_at` is not exposed. Amounts are numbers (JSON), not
+strings.
 
 `/{source}/{lot_number}/images` lists a lot's photos. Copart's public photo list is fetched
 through `app.state.http`, always from the URL stored for that lot (`image_url`) and never from
@@ -98,5 +103,6 @@ mailer through `create_app(settings, mailer=..., http=...)`.
 
 Tests run against a real Postgres (`TEST_DATABASE_URL`, or a testcontainers `postgres:17`).
 Each test starts from a fresh database: `public` from `tests/schema.sql` (a copy of the
-ingest's `lots` DDL, to refresh when the ingest adds a column the API exposes) and `app` from
+tables the ingest worker creates here, to refresh when the ingest adds a column the API
+exposes) and `app` from
 this repo's migrations.

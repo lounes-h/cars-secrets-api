@@ -19,7 +19,7 @@ from .mail import Mailer, make_mailer
 def create_app(settings: Settings | None = None, *, mailer: Mailer | None = None,
                http: httpx.Client | None = None) -> FastAPI:
     settings = settings or get_settings()
-    pool = make_pool(settings.database_url)                     # ingest tables, read-only
+    pool = make_pool(settings.database_url)                     # synced lots, read-only
     rw_pool = make_pool(settings.database_url, read_only=False)  # the `app` schema
     http = http or httpx.Client()
 

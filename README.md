@@ -2,12 +2,14 @@
 
 HTTP API for the Car's Secrets web app: dealer accounts, and read-only access to the auction
 lots ingested by [cars-secrets-data-ingest](https://github.com/lounes-h/cars-secrets-data-ingest).
+It has its own database: the ingest's worker keeps its active lots in step, and this repo
+migrates its accounts.
 Bidding is not handled here: every lot carries a `listing_url` to the auction site.
 
 ## Run it
 
 ```bash
-cp .env.example .env      # set DATABASE_URL to the ingest Postgres (127.0.0.1:5433)
+cp .env.example .env      # set DATABASE_URL to the API database (the ingest's api-db, 127.0.0.1:5434)
 uv sync
 uv run alembic upgrade head                              # creates the `app` schema (accounts)
 uv run uvicorn app.main:app_factory --factory --reload   # http://localhost:8000/api/docs
@@ -16,6 +18,23 @@ uv run uvicorn app.main:app_factory --factory --reload   # http://localhost:8000
 Without `SMTP_HOST`, confirmation codes and reset links are printed in the log. Without
 `TURNSTILE_SECRET`, the captcha is not enforced. Google and Apple sign-in answer
 `501 provider_not_configured` until their variables are set.
+
+## Moving accounts off the ingest database (once)
+
+Until September 2026 the API shared the ingest's database, so existing accounts live in its
+`app` schema. Stop the API, then copy them over from the ingest repo's folder (the containers'
+own `pg_dump`/`psql`, so versions match):
+
+```bash
+cd ../cars-secrets-data-ingest
+docker compose exec -T db pg_dump -U ingest -d ingest --schema=app --no-owner \
+  | docker compose exec -T api-db psql -U api -d api -v ON_ERROR_STOP=1 --single-transaction
+```
+
+The dump carries `app.alembic_version`, so `uv run alembic upgrade head` then has nothing to do.
+Point `DATABASE_URL` at the API database, start the API, sign in to check, and only then drop
+the old copy: `docker compose exec db psql -U ingest -d ingest -c 'DROP SCHEMA app CASCADE'`.
+For a hosted API database, pipe the same dump into `psql "$DATABASE_URL"`.
 
 ## Endpoints
 

@@ -7,7 +7,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # The ingest database (owned by cars-secrets-data-ingest). No default: it holds a password.
+    # The API's own database: accounts (`app`, migrated here) and the lots the ingest worker
+    # keeps in step (`public`, owned by cars-secrets-data-ingest). No default: it holds a password.
     database_url: str
     # Public origin of the web app: links in emails and OAuth redirect URIs point there.
     web_url: str = "http://localhost:3000"

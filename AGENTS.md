@@ -22,7 +22,7 @@ read `docs/project-specification.md`
 ## Commands
 
 ```bash
-cp .env.example .env                                    # DATABASE_URL of the ingest Postgres, …
+cp .env.example .env                                    # DATABASE_URL of the API database, …
 uv sync                                                 # create .venv with dev dependencies
 uv run alembic upgrade head                             # apply this repo's migrations (app schema)
 uv run alembic revision -m "describe change"            # new migration file
@@ -41,10 +41,14 @@ Actions runs both on every pull request and on pushes to `main` (`.github/workfl
 
 See `docs/architecture.md` for details.
 
-- One database, two schemas. The ingest repo owns `public` (`lots`, …): this API **reads** it
-  through `app.state.pool`, whose connections are opened with
-  `default_transaction_read_only=on`. Schema changes to ingest tables are made in the ingest
-  repo, never here.
+- The API has its own database (`DATABASE_URL`), separate from the ingest's, with two
+  schemas. cars-secrets-data-ingest's worker owns `public` (`lots`, `ingest_sync`): it keeps
+  `lots` in step with the ingest and creates its columns. This API **reads** it through
+  `app.state.pool`, whose connections are opened with `default_transaction_read_only=on`.
+  Schema changes to `public` are made in the ingest repo (`api_sync.py`), never here.
+- `lots` there holds the active lots, plus removed lots until their auction is over (sale time
+  + 4 h), with only the served columns: no `attributes`, row hashes, `last_seen_at` or file
+  ids.
 - This API owns the `app` schema (accounts), written through `app.state.rw_pool`
   (`auth.RwConn`) and migrated by `migrations/versions/NNNN_description.py`: raw SQL via
   `op.execute`, never importing application code, never touching `public`. Never edit a
@@ -83,8 +87,8 @@ Alembic, raw SQL, `app` schema only (`migrations/`, version table `app.alembic_v
 ## Tests
 
 Tests sit in `tests/` and run against a real PostgreSQL. `tests/schema.sql` is a copy of the
-ingest's `lots` DDL (migrations 0001, 0002 + 0007); refresh it when the ingest adds a column the
-API exposes. Fixtures in `tests/conftest.py`: `conn` (fresh database), `settings`, `mailer`
+tables the ingest worker creates in the API database (`api_sync.ensure_schema`); refresh it
+when the ingest adds a column the API exposes. Fixtures in `tests/conftest.py`: `conn` (fresh database), `settings`, `mailer`
 (captures messages, `last_link(path)` extracts a token, `last_code()` the confirmation code), `http_handler` (set `.fn` to script
 Turnstile / HIBP / OAuth responses), `client` (`TestClient` over `create_app` with those
 fakes), `insert_lot`.
@@ -151,7 +155,8 @@ A code change is not considered complete until the relevant unit tests have been
 
 ## Current state
 
-Working: read-only lots (`/api/lots`), accounts (register with terms acceptance and optional
+Working: its own database, whose lots the ingest worker keeps in step (existing accounts are
+moved over once, see README); read-only lots (`/api/lots`), accounts (register with terms acceptance and optional
 E.164 phone, email confirmation by a six-digit code that also signs the dealer in, login with remember-me and captcha after repeated failures,
 logout, me, forgot / reset password), Google and Apple sign-in (built and tested with fakes;
 they need credentials in `.env` to be offered). Mail goes to the log until `SMTP_*` is set;

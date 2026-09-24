@@ -1,6 +1,6 @@
 """Tests run against a real PostgreSQL: TEST_DATABASE_URL if set, otherwise a throwaway
 container started through testcontainers (needs Docker). The `lots` table comes from
-tests/schema.sql, a copy of the ingest repo's DDL."""
+tests/schema.sql, a copy of the tables the ingest worker creates in the API database."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ def db_url() -> Iterator[str]:
 
 @pytest.fixture
 def conn(db_url: str) -> Iterator[psycopg.Connection]:
-    """A fresh database for every test: the ingest `lots` table from schema.sql and this
+    """A fresh database for every test: the synced `lots` table from schema.sql and this
     repo's `app` schema from its migrations."""
     with psycopg.connect(db_url, autocommit=True, row_factory=dict_row) as c:
         c.execute("DROP SCHEMA IF EXISTS app CASCADE; DROP SCHEMA public CASCADE; "
@@ -102,8 +102,7 @@ def insert_lot(conn: psycopg.Connection, lot_number: str, **overrides: Any) -> N
         "source": "copart", "lot_number": lot_number, "year": 2020, "make": "TOYOTA",
         "model_group": "CAMRY", "vin": f"VIN{lot_number:0>14}", "sale_at": "2026-10-01T15:00Z",
         "high_bid": 1500, "est_retail_value": 12000, "repair_cost": 4000,
-        "attributes": "{}", "row_hash": b"\x00", "first_seen_at": "2026-09-01T00:00Z",
-        "last_seen_at": "2026-09-19T00:00Z", "last_changed_at": "2026-09-10T00:00Z",
+        "first_seen_at": "2026-09-01T00:00Z", "last_changed_at": "2026-09-10T00:00Z",
         "removed_at": None,
     }
     row.update(overrides)

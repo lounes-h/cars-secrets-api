@@ -1,6 +1,7 @@
--- Copy of the `lots` table from cars-secrets-data-ingest (migrations 0001, 0002 + 0007), without
--- the foreign keys to ingest_files. The API only reads this table and cannot import the
--- ingest migrations. ponytail: re-copy when the ingest adds a column the API exposes.
+-- The API database's tables as cars-secrets-data-ingest creates them (`api_sync.ensure_schema`):
+-- its worker owns `public` here and keeps `lots` in step: active lots, and removed lots until
+-- their auction is over, with only the served columns. ponytail: re-copy when the ingest adds a
+-- column the API exposes.
 CREATE TABLE lots (
     source              text NOT NULL,
     lot_number          text NOT NULL,
@@ -49,13 +50,19 @@ CREATE TABLE lots (
     thumbnail_url       text,
     source_created_at   timestamp,
     source_updated_at   timestamptz,
-    attributes          jsonb NOT NULL,
-    row_hash            bytea NOT NULL,
     first_seen_at       timestamptz NOT NULL,
-    last_seen_at        timestamptz NOT NULL,
     last_changed_at     timestamptz NOT NULL,
     removed_at          timestamptz,
-    first_file_id       bigint,
-    last_file_id        bigint,
     PRIMARY KEY (source, lot_number)
+);
+CREATE INDEX lots_listing ON lots (first_seen_at DESC, lot_number) WHERE removed_at IS NULL;
+CREATE INDEX lots_lot_number ON lots (lot_number);
+CREATE INDEX lots_vin ON lots (vin);
+CREATE INDEX lots_make_model ON lots (make, model_group);
+CREATE INDEX lots_removed ON lots (removed_at) WHERE removed_at IS NOT NULL;
+
+CREATE TABLE ingest_sync (
+    id           boolean PRIMARY KEY DEFAULT true CHECK (id),
+    sync_version bigint NOT NULL,
+    synced_at    timestamptz NOT NULL
 );
