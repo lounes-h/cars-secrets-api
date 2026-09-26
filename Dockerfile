@@ -11,5 +11,5 @@ COPY app app
 RUN pip install .
 
 USER 10001
-EXPOSE 8000
-CMD ["uvicorn", "app.main:app_factory", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+EXPOSE 8001
+CMD ["uvicorn", "app.main:app_factory", "--factory", "--host", "0.0.0.0", "--port", "8001"]

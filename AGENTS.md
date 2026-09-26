@@ -26,7 +26,7 @@ cp .env.example .env                                    # DATABASE_URL of the AP
 uv sync                                                 # create .venv with dev dependencies
 uv run alembic upgrade head                             # apply this repo's migrations (app schema)
 uv run alembic revision -m "describe change"            # new migration file
-uv run uvicorn app.main:app_factory --factory --reload  # http://localhost:8000/api/docs
+uv run uvicorn app.main:app_factory --factory --reload --port 8001  # http://localhost:8001/api/docs
 uv run ruff check app tests migrations
 uv run pytest                                           # throwaway Postgres via Docker
 uv run pytest --cov                                     # the same, failing below 95 % coverage
