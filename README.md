@@ -8,12 +8,27 @@ Bidding is not handled here: every lot carries a `listing_url` to the auction si
 
 ## Run it
 
+### First-time setup
+
+From the repository root, with uv installed and the API's PostgreSQL database running:
+
 ```bash
 cp .env.example .env      # set DATABASE_URL to the API database (the ingest's api-db, 127.0.0.1:5434)
 uv sync
 uv run alembic upgrade head                              # creates the `app` schema (accounts)
-uv run uvicorn app.main:app_factory --factory --reload   # http://localhost:8000/api/docs
 ```
+
+### Start the service
+
+After setup, run this from the repository root:
+
+```bash
+uv run uvicorn app.main:app_factory --factory --reload
+```
+
+The development server runs at http://localhost:8000 and reloads when Python files change.
+Open [API docs](http://localhost:8000/api/docs) or check
+[health](http://localhost:8000/api/health). Stop it with `Ctrl+C`.
 
 Without `SMTP_HOST`, confirmation codes and reset links are printed in the log. Without
 `TURNSTILE_SECRET`, the captcha is not enforced. Google and Apple sign-in answer
