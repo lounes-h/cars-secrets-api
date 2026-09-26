@@ -30,6 +30,16 @@ The development server runs at http://localhost:8000 and reloads when Python fil
 Open [API docs](http://localhost:8000/api/docs) or check
 [health](http://localhost:8000/api/health). Stop it with `Ctrl+C`.
 
+The web app's `API_URL` in `../cars-secrets-web/.env.local` must match this server's
+address. If port 8000 is occupied, use port 8001:
+
+```bash
+uv run uvicorn app.main:app_factory --factory --reload --port 8001
+```
+
+Set `API_URL=http://localhost:8001` in the web app and restart `yarn dev` after changing
+it. The API docs and health check then use port 8001 too.
+
 Without `SMTP_HOST`, confirmation codes and reset links are printed in the log. Without
 `TURNSTILE_SECRET`, the captcha is not enforced. Google and Apple sign-in answer
 `501 provider_not_configured` until their variables are set.
