@@ -10,7 +10,7 @@ import httpx
 import psycopg
 from fastapi import APIRouter, Depends, FastAPI
 
-from . import auth, lots
+from . import auth, lots, preferences
 from .config import Settings, get_settings
 from .db import make_pool
 from .mail import Mailer, make_mailer
@@ -45,7 +45,8 @@ def create_app(settings: Settings | None = None, *, mailer: Mailer | None = None
     Conn = Annotated[psycopg.Connection, Depends(db)]
 
     public = APIRouter(prefix="/api")
-    # Routes for signed-in dealers take `auth.User`; `/api/lots` stays public for now.
+    # Routes for signed-in dealers take `auth.User` (lot preferences); `/api/lots` stays public
+    # for now.
     api = APIRouter(prefix="/api")
 
     @public.get("/health")
@@ -55,6 +56,7 @@ def create_app(settings: Settings | None = None, *, mailer: Mailer | None = None
 
     public.include_router(auth.router)
     api.include_router(lots.router(Conn))
+    api.include_router(preferences.router)
     app.include_router(public)
     app.include_router(api)
     return app

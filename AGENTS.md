@@ -156,7 +156,8 @@ A code change is not considered complete until the relevant unit tests have been
 ## Current state
 
 Working: its own database, whose lots the ingest worker keeps in step (existing accounts are
-moved over once, see README); read-only lots (`/api/lots`), accounts (register with terms acceptance and optional
+moved over once, see README); read-only lots (`/api/lots` with search, filters, sorts, per-option
+counts and search interpretation; a dealer's last filters in `/api/me/lot-preferences`), accounts (register with terms acceptance and optional
 E.164 phone, email confirmation by a six-digit code that also signs the dealer in, login with remember-me and captcha after repeated failures,
 logout, me, forgot / reset password), Google and Apple sign-in (built and tested with fakes;
 they need credentials in `.env` to be offered). Mail goes to the log until `SMTP_*` is set;
@@ -166,7 +167,7 @@ trained on generated sold prices until real ones exist, and the field is `null` 
 deployed.
 
 Not done: terms of use and privacy policy documents, profile editing, email change, account
-deletion, MFA, saved lots, searches, alerts, deal analysis. CORS is not enabled; the web app
+deletion, MFA, saved lots, saved searches, alerts, deal analysis. CORS is not enabled; the web app
 calls the API from its server.
 
 ## Branching

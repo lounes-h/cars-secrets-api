@@ -21,7 +21,8 @@ writable pool. The two never touch each other's tables.
 | `config.py` | `Settings` from the environment |
 | `db.py` | The two psycopg pools (`make_pool(read_only=...)`), `run_migrations` |
 | `main.py` | `create_app()`: pools, mailer and HTTP client on `app.state`; routers; `/api/health` |
-| `lots.py` | The `Lot` contract, SQL and `/api/lots` routes (read-only pool) |
+| `lots.py` | The `Lot` contract, SQL and `/api/lots` routes (read-only pool): search, filters, counts |
+| `preferences.py` | `/api/me/lot-preferences`: a dealer's last lot filters and how often each is used |
 | `auth.py` | `/api/auth` routes and the `current_user` bearer dependency |
 | `accounts.py` | Storage in the `app` schema: users, sessions, tokens, identities, throttle |
 | `security.py` | Argon2id hashing, opaque tokens, breached-password check, Turnstile |
@@ -32,7 +33,7 @@ writable pool. The two never touch each other's tables.
 ## Routers
 
 `main.py` mounts two routers under `/api`: `public` (health, auth) and `api` (lots, for now
-public too). A route for a signed-in dealer declares `user: auth.User`, which reads
+public too, and lot preferences). A route for a signed-in dealer declares `user: auth.User`, which reads
 `Authorization: Bearer <token>` and resolves the session; that is where the web server puts
 the token it keeps in its cookie.
 
@@ -56,10 +57,37 @@ stands in, with its full-size twin (`_thb` -> `_ful`). Photos are best effort: a
 failure is an empty list, not an error. Nothing is cached, so one lot page is one upstream
 call; add a TTL cache if views grow.
 
-Only active lots (`removed_at IS NULL`) are served; a removed lot is a 404. `q` matches a lot
-number exactly, a VIN case-insensitively, or a make / model prefix with LIKE wildcards
-escaped. Results are ordered `first_seen_at DESC, lot_number`: the lots the ingest saw most
-recently come first, which is what a dealer wants to look at.
+Only active lots (`removed_at IS NULL`) are served; a removed lot is a 404. Each word of `q`
+must match: a lot number exactly, a VIN case-insensitively, a make or model prefix, or part of
+the trim, model detail, colour, body, fuel or drive, with LIKE wildcards escaped. Results are
+ordered `first_seen_at DESC, lot_number` unless `sort` says otherwise: the lots the ingest saw
+most recently come first, which is what a dealer wants to look at.
+
+The filters (`LotFilters`) read the lots through `LOTS`, a subquery that adds each list
+filter's value as a column (`f_title`, `f_run`, ...), in the words the web shows rather than
+Copart's codes. A list filter matches any of its values; filters narrow together. A title's
+group (clean, salvage, non-repairable) comes from `copart_titles.json`, a copy of the web's
+`src/lib/copart-titles.json` keyed "STATE CODE", passed as one JSONB parameter so the lookup is
+per row rather than a join; refresh the copy when the web's file changes. Copart's "DEFAULT"
+run status reads as not verified, as on the lot page. Sale windows (`today`, `tomorrow`, the rest
+of `this_week` to Sunday, `next_week`) start at midnight in the dealer's zone `tz` (UTC when
+unknown); `future` is a lot with neither a sale time nor a sale day, the lot page's "Future
+sale". `model` also matches Copart's longer groups of that model ("RAV4" is "RAV4 BASE" too).
+
+`/counts` says how many lots each option of the named filters would show, leaving each
+filter's own choice out of its counts so a second value can still be added. It is one scan per
+filter (~35 ms at 150k lots), so the web asks for a list's counts when the dealer opens it
+rather than with every page; only the 100 most common makes are counted, and models only within
+a make. No index serves these: most filters match a large share of the lots, where a sequential
+scan wins anyway.
+
+`/interpret` reads a search the way a dealer means it. One word that is a lot number or a VIN
+of exactly one active lot names that lot. Otherwise years ("2019", "2018-2021"), a make (up to
+three words, ignoring case and punctuation: "mercedes benz" is "MERCEDES-BENZ") and a model are
+taken out, and the other words are left as `q`. Only makes with at least 10 active lots count,
+since rarer ones are misspellings ("TOYT") or words a dealer means otherwise ("WHITE" trucks).
+A model alone names its make when that make holds at least 90 % of the model's lots ("camry" is
+a Toyota, but "1500" is Ram's and GMC's, so it stays a word).
 
 ## Accounts (`app` schema)
 
@@ -72,6 +100,7 @@ recently come first, which is what a dealer wants to look at.
 | `email_codes` | one live confirmation code per user: HMAC of the code, `attempts`, `created_at`, expiry |
 | `oauth_states` | state → provider, PKCE verifier, nonce, `redirect_to`; deleted when used |
 | `throttle` | one row per counted event (`login:email:…`, `login:ip:…`, `code:email:…`, `code:ip:…`, `mail:…`) |
+| `lot_preferences` | per user: the lot list's last `filters` (a query string the web validates on use) and `usage`, how many times each list parameter was set or changed |
 
 ## Auth flows
 

@@ -4,7 +4,10 @@
 
 - `/api/lots` and `/api/health` are public and read-only. `/api/auth/*` is public by nature;
   `logout` and `me` need a bearer session. Routes for signed-in dealers declare
-  `user: auth.User`.
+  `user: auth.User`; `/api/me/lot-preferences` reads and writes only the caller's own row.
+- Lot filters are typed (`LotFilters`): enumerated values, at most 50 values per list, capped
+  text. Their SQL is built from code constants and every value is a parameter; the stored
+  preference string is capped at 2000 characters and only known parameters are counted.
 - Only typed lot columns are served, never the raw `attributes` export data. User responses
   carry id, email, names, phone and the verified flag; never hashes or tokens.
 - Register, resend-verification and forgot-password answer the same `200 {"ok": true}` whether

@@ -63,7 +63,9 @@ For a hosted API database, pipe the same dump into `psql "$DATABASE_URL"`.
 | Route | Returns |
 |---|---|
 | `GET /api/health` | `{"status": "ok"}` once the database answers |
-| `GET /api/lots` | `{items, total}` of active lots, the most recently listed first. Filters: `q` (lot number, VIN, make or model prefix), `make`, `source`, `year_min`, `year_max`, `limit` (≤ 100), `offset` |
+| `GET /api/lots` | `{items, total}` of active lots. Search `q` (every word must match a lot number, VIN, make or model prefix, or trim, model detail, colour, body, fuel or drive); list filters, each matching any of its repeated values: `source`, `title` (`clean`, `salvage`, `nonrepairable`), `run` (`verified`, `starts`, `unverified`), `damage`, `damage2`, `keys` (`yes`, `no`, `exempt`), `sale_type` (`pure`, `minimum`, `approval`), `vehicle_type`, `state`, `location` (`yard`, `offsite`); `sale` (`today`, `tomorrow`, `this_week`, `next_week`, `future`) in the zone `tz`; `buy_now`; `make`, `model`; ranges `year_min`/`year_max`, `odometer_max`, `retail_min`/`retail_max`, `bin_max`, `bid_max`; `sort` (`newest`, `sale`, `year`, `mileage`, `retail`); `limit` (≤ 100), `offset` |
+| `GET /api/lots/counts` | `{facets: {name: [{value, count}]}}`: the same filters, plus `facets` naming the filters to count (any list filter, `make`, `model`, `sale`, `buy_now`); each one's counts leave out its own choice |
+| `GET /api/lots/interpret?q=` | `{lot, make, model, year_min, year_max, q}`: the one lot a lot number or VIN names, or the make, model and years a search names and the words left over |
 | `GET /api/lots/{source}/{lot_number}` | One active lot, 404 otherwise |
 | `GET /api/lots/{source}/{lot_number}/images` | `{images: [{thumb, full}]}`: every photo the auction publishes for the lot, empty when it has none or is unreachable |
 | `POST /api/auth/register` | Always `{ok: true}`; mails a six-digit confirmation code (or an "account exists" hint) |
@@ -75,6 +77,7 @@ For a hosted API database, pipe the same dump into `psql "$DATABASE_URL"`.
 | `POST /api/auth/reset-password` | Sets the password from the emailed token, revokes all sessions |
 | `POST /api/auth/oauth/{google\|apple}/start` | `{authorize_url, state}` |
 | `POST /api/auth/oauth/{google\|apple}/callback` | `{token, expires_at, new_user, redirect_to}` |
+| `GET`, `PUT /api/me/lot-preferences` | Bearer session. `{filters, usage}`: the lot list's last filters (a query string, ≤ 2000 characters) and how often the dealer set each one; `PUT {filters}` keeps them and counts each set or changed parameter |
 
 ## Development
 
