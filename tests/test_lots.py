@@ -6,7 +6,16 @@ import psycopg
 import pytest
 
 from app.db import make_pool
-from app.lots import Counted, CountQuery, LotQuery, count_lots, list_lots, sale_windows, zone
+from app.lots import (
+    Counted,
+    CountQuery,
+    LotQuery,
+    count_lots,
+    list_lots,
+    lot_activity,
+    sale_windows,
+    zone,
+)
 from tests.conftest import insert_lot
 
 
@@ -418,6 +427,37 @@ def test_counts_of_sale_windows(conn):
 
     assert sorted((v.value, v.count) for v in counts) == [
         ("future", 1), ("next_week", 1), ("this_week", 2), ("today", 1), ("tomorrow", 1)]
+
+
+def test_activity_in_the_dealers_zone(conn):
+    # Saturday 9 pm in New York: today began at 04:00 UTC, the 3 days on Thursday, the 7 on Sunday.
+    now = datetime(2026, 10, 3, 21, 0, tzinfo=ZoneInfo("America/New_York"))
+    new = {"first_seen_at": "2026-10-03T13:00Z", "last_changed_at": "2026-10-03T13:00Z"}
+    insert_lot(conn, "1", **new)
+    # Friday 10 pm in New York, though already Saturday in UTC.
+    insert_lot(conn, "2", first_seen_at="2026-10-03T02:00Z", last_changed_at="2026-10-03T02:00Z")
+    insert_lot(conn, "3", first_seen_at="2026-09-20T12:00Z", last_changed_at="2026-10-03T15:00Z")
+    insert_lot(conn, "4", first_seen_at="2026-09-20T12:00Z", last_changed_at="2026-09-30T12:00Z")
+    # Added within the 7 days, so updated only in the 3 days, which it predates.
+    insert_lot(conn, "5", first_seen_at="2026-09-29T12:00Z", last_changed_at="2026-10-02T12:00Z")
+    insert_lot(conn, "6", removed_at="2026-10-03T14:00Z", **new)
+    insert_lot(conn, "7")  # seen and last changed in early September
+
+    activity = lot_activity(conn, "America/New_York", now=now)
+
+    assert activity.added.model_dump() == {"today": 1, "last_3_days": 2, "last_7_days": 3}
+    assert activity.updated.model_dump() == {"today": 1, "last_3_days": 2, "last_7_days": 2}
+
+
+def test_activity_endpoint(client, conn):
+    insert_lot(conn, "1")
+    response = client.get("/api/lots/activity", params={"tz": "Mars/Olympus"})
+    assert response.status_code == 200
+    assert response.json() == {
+        "added": {"today": 0, "last_3_days": 0, "last_7_days": 0},
+        "updated": {"today": 0, "last_3_days": 0, "last_7_days": 0},
+    }
+    assert client.get("/api/lots/activity", params={"tz": "x" * 65}).status_code == 422
 
 
 def test_counts_need_a_known_filter(client):

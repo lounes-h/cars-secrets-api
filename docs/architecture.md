@@ -81,6 +81,12 @@ rather than with every page; only the 100 most common makes are counted, and mod
 a make. No index serves these: most filters match a large share of the lots, where a sequential
 scan wins anyway.
 
+`/activity?tz=` says how many active lots were added (`first_seen_at`) and how many seen
+before that changed (`last_changed_at`), today and over the last 3 and 7 days, each window
+starting at midnight in the dealer's zone (an unknown zone is UTC). A lot added in a window is
+not also counted as updated in it. One scan of the active lots (~35 ms at 150k), for the
+summary at the top of the web's lot list.
+
 `/interpret` reads a search the way a dealer means it. One word that is a lot number or a VIN
 of exactly one active lot names that lot. Otherwise years ("2019", "2018-2021"), a make (up to
 three words, ignoring case and punctuation: "mercedes benz" is "MERCEDES-BENZ") and a model are

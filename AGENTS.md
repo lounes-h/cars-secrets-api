@@ -157,7 +157,7 @@ A code change is not considered complete until the relevant unit tests have been
 
 Working: its own database, whose lots the ingest worker keeps in step (existing accounts are
 moved over once, see README); read-only lots (`/api/lots` with search, filters, sorts, per-option
-counts and search interpretation; a dealer's last filters in `/api/me/lot-preferences`), accounts (register with terms acceptance and optional
+counts, search interpretation and how many lots were added or changed lately (`/api/lots/activity`); a dealer's last filters in `/api/me/lot-preferences`), accounts (register with terms acceptance and optional
 E.164 phone, email confirmation by a six-digit code that also signs the dealer in, login with remember-me and captcha after repeated failures,
 logout, me, forgot / reset password), Google and Apple sign-in (built and tested with fakes;
 they need credentials in `.env` to be offered). Mail goes to the log until `SMTP_*` is set;
