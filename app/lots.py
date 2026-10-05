@@ -391,6 +391,41 @@ def count_lots(conn: psycopg.Connection, f: CountQuery, now: datetime | None = N
                              for name, values in counts.items()})
 
 
+ACTIVITY_DAYS = {"today": 1, "last_3_days": 3, "last_7_days": 7}
+
+
+class ActivityCounts(BaseModel):
+    today: int
+    last_3_days: int
+    last_7_days: int
+
+
+class Activity(BaseModel):
+    """Active lots first seen in each window, and lots seen before it that changed in it."""
+
+    added: ActivityCounts
+    updated: ActivityCounts
+
+
+def lot_activity(conn: psycopg.Connection, tz: str, now: datetime | None = None) -> Activity:
+    """Each window starts at midnight in the dealer's zone: today, or 3 or 7 days counting today.
+    A lot added in a window is not also counted as updated in it.
+    ponytail: one scan of the active lots (~30 ms at 150k); index first_seen_at and
+    last_changed_at if it gets slow."""
+    now = (now or datetime.now(ZoneInfo("UTC"))).astimezone(zone(tz))
+    starts = {}
+    for name, days in ACTIVITY_DAYS.items():
+        day = now.date() - timedelta(days=days - 1)
+        starts[name] = datetime(day.year, day.month, day.day, tzinfo=now.tzinfo)
+    columns = ", ".join(
+        f"""count(*) FILTER (WHERE first_seen_at >= %({n})s) AS added_{n},
+            count(*) FILTER (WHERE last_changed_at >= %({n})s AND first_seen_at < %({n})s)
+            AS updated_{n}""" for n in ACTIVITY_DAYS)
+    row = conn.execute(f"SELECT {columns} FROM lots WHERE removed_at IS NULL", starts).fetchone()
+    return Activity(**{kind: ActivityCounts(**{n: row[f"{kind}_{n}"] for n in ACTIVITY_DAYS})
+                       for kind in ("added", "updated")})
+
+
 class LotKey(BaseModel):
     source: str
     lot_number: str
@@ -489,6 +524,12 @@ def router(Conn: Any) -> APIRouter:
     def counts(conn: Conn, f: Annotated[CountQuery, Query()]) -> LotCounts:
         """How many lots each option of the asked filters would show, given the other filters."""
         return count_lots(conn, f)
+
+    @r.get("/activity")
+    def activity(conn: Conn, tz: Annotated[str, Query(max_length=64)] = "UTC") -> Activity:
+        """How many lots were added, and how many changed, today and in the last 3 and 7 days,
+        in the dealer's zone (an unknown zone is UTC)."""
+        return lot_activity(conn, tz)
 
     @r.get("/interpret")
     def interpret_search(conn: Conn,
