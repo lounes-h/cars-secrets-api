@@ -361,6 +361,20 @@ def test_sorts(client, conn, sort, expected):
     assert client.get("/api/lots", params={"sort": "cheapest"}).status_code == 422
 
 
+@pytest.mark.parametrize("sort", ["newest", "sale", "year", "mileage", "retail"])
+def test_cars_come_first_in_every_order(client, conn, sort):
+    # The truck and the lot without a type would lead every order: newest, soonest, youngest,
+    # least driven, cheapest.
+    lead = {"first_seen_at": "2026-09-09T00:00Z", "sale_at": "2026-10-01T10:00Z", "year": 2025,
+            "odometer": 10, "est_retail_value": 100}
+    insert_lot(conn, "1", vehicle_type="K", **lead)
+    insert_lot(conn, "2", vehicle_type=None, **lead)
+    insert_lot(conn, "3", vehicle_type="V", first_seen_at="2026-09-01T00:00Z",
+               sale_at="2026-10-05T10:00Z", year=2010, odometer=200000, est_retail_value=9000)
+
+    assert lot_numbers(client.get("/api/lots", params={"sort": sort})) == ["3", "1", "2"]
+
+
 def test_rejects_unknown_filter_values(client):
     assert client.get("/api/lots", params={"title": "rebuilt"}).status_code == 422
     assert client.get("/api/lots", params={"sale": "yesterday"}).status_code == 422

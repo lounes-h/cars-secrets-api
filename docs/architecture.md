@@ -59,9 +59,10 @@ call; add a TTL cache if views grow.
 
 Only active lots (`removed_at IS NULL`) are served; a removed lot is a 404. Each word of `q`
 must match: a lot number exactly, a VIN case-insensitively, a make or model prefix, or part of
-the trim, model detail, colour, body, fuel or drive, with LIKE wildcards escaped. Results are
-ordered `first_seen_at DESC, lot_number` unless `sort` says otherwise: the lots the ingest saw
-most recently come first, which is what a dealer wants to look at.
+the trim, model detail, colour, body, fuel or drive, with LIKE wildcards escaped. Cars
+(vehicle type `V`) always come first, whatever the order (`CARS_FIRST`), then every other type.
+Within each, results are ordered `first_seen_at DESC, lot_number` unless `sort` says otherwise:
+the lots the ingest saw most recently come first, which is what a dealer wants to look at.
 
 The filters (`LotFilters`) read the lots through `LOTS`, a subquery that adds each list
 filter's value as a column (`f_title`, `f_run`, ...), in the words the web shows rather than
