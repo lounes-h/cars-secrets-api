@@ -4,6 +4,7 @@ import logging
 import secrets
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
+from importlib.metadata import version
 from typing import Annotated
 
 import httpx
@@ -32,8 +33,8 @@ def create_app(settings: Settings | None = None, *, mailer: Mailer | None = None
         pool.close()
         http.close()
 
-    app = FastAPI(title="Car's Secrets API", lifespan=lifespan, docs_url="/api/docs",
-                  openapi_url="/api/openapi.json")
+    app = FastAPI(title="Car's Secrets API", version=version("cars-secrets-api"), lifespan=lifespan,
+                  docs_url="/api/docs", openapi_url="/api/openapi.json")
     app.state.settings, app.state.pool, app.state.rw_pool = settings, pool, rw_pool
     app.state.mailer, app.state.http = mailer or make_mailer(settings), http
     app.state.code_key = settings.email_code_secret.encode() or dev_code_key()
