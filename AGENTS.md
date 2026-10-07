@@ -35,7 +35,10 @@ docker build -t cars-secrets-api .
 ```
 
 Run `uv run ruff check app tests migrations && uv run pytest --cov` before committing. GitHub
-Actions runs both on every pull request and on pushes to `main` (`.github/workflows/ci.yml`).
+Actions runs both on every pull request and on pushes to `main` (`.github/workflows/ci.yml`),
+checks that a pull request's commit subjects are conventional, and releases each push to `main`
+that passes (see Versioning). The API reports the installed package's version in its OpenAPI
+document (`/api/openapi.json`, `/api/docs`), so it never holds a version of its own.
 
 ## Architecture rules (important)
 
@@ -234,9 +237,31 @@ After making the requested changes:
 Do not stop after editing files, after creating a local commit, or after
 pushing without a pull request.
 
+## Versioning
+
+Versions are automatic, in semver; never edit `version` in `pyproject.toml` or `CHANGELOG.md` by
+hand. Each push to `main` that passes CI runs semantic-release (the `release` job in
+`.github/workflows/ci.yml`, configured in `.releaserc.json`). It reads the commit subjects since
+the last `vX.Y.Z` tag and takes the biggest bump among them:
+
+| Commit | Bump |
+|---|---|
+| `type!:` or a `BREAKING CHANGE:` footer | major (also from 0.x: 0.4.2 → 1.0.0) |
+| `feat:` | minor (0.1.0 → 0.2.0) |
+| `fix:`, `perf:`, `refactor:`, a revert | patch (0.2.0 → 0.2.1) |
+| `docs:`, `test:`, `chore:`, `ci:`, `build:`, `style:` | none: nothing is released |
+
+It then writes the new version into `pyproject.toml` and `uv.lock` (`uv version`) and the notes
+into `CHANGELOG.md`, commits all three to `main` as `chore(release): X.Y.Z [skip ci]`, tags `vX.Y.Z`
+and publishes a GitHub release with the notes.
+The first tag, `v0.1.0`, marks everything before automatic versioning. The `commits` job fails a
+pull request holding a commit whose subject is not `type: subject` (or `type(scope): subject`),
+since such a commit would silently count for nothing.
+
 ## Commit Rules
 
-Use descriptive commit messages.
+Use descriptive commit messages, prefixed with their type: the prefix decides the
+next version (see Versioning).
 
 Prefer messages such as:
 
