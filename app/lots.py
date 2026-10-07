@@ -209,14 +209,19 @@ SALE_WINDOWS = ("today", "tomorrow", "this_week", "next_week")
 # Words that are not a make, model, year or lot match these, besides a make / model prefix.
 DESCRIPTION = "concat_ws(' ', model_detail, trim, color, body_style, fuel_type, drive)"
 MAKES_SHOWN = 100  # the most common makes; the rest are found through search
-SORTS = {
+# Cars (Copart's vehicle type "V", automobiles) come first in every order, then the trucks,
+# trailers, boats and the rest, each part in the order asked for.
+# ponytail: Copart's code, and "newest" no longer walks lots_listing (~50 -> ~110 ms at 150k
+# lots); index (vehicle_type IS DISTINCT FROM 'V', first_seen_at DESC) in the ingest if it drags.
+CARS_FIRST = "vehicle_type IS DISTINCT FROM 'V'"
+SORTS = {name: f"{CARS_FIRST}, {order}" for name, order in {
     "newest": "first_seen_at DESC, lot_number",
     "sale": "sale_at ASC NULLS LAST, lot_number",
     "year": "year DESC NULLS LAST, lot_number",
     "mileage": "odometer ASC NULLS LAST, lot_number",
     # No value is not the lowest value.
     "retail": "NULLIF(est_retail_value, 0) ASC NULLS LAST, lot_number",
-}
+}.items()}
 
 Codes = Annotated[list[str], Field(max_length=50)]
 Amount = Annotated[int | None, Field(ge=0)]
