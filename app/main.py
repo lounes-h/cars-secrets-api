@@ -2,6 +2,7 @@
 
 import logging
 import secrets
+import threading
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from importlib.metadata import version
@@ -11,7 +12,7 @@ import httpx
 import psycopg
 from fastapi import APIRouter, Depends, FastAPI
 
-from . import auth, lots, preferences
+from . import alerts, auth, lots, preferences, saved
 from .config import Settings, get_settings
 from .db import make_pool
 from .mail import Mailer, make_mailer
@@ -24,11 +25,21 @@ def create_app(settings: Settings | None = None, *, mailer: Mailer | None = None
     rw_pool = make_pool(settings.database_url, read_only=False)  # the `app` schema
     http = http or httpx.Client()
 
+    stop = threading.Event()
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         pool.open()
         rw_pool.open()
+        job = None
+        if settings.alerts_interval_seconds > 0:
+            job = threading.Thread(target=alerts.loop, args=(app.state, stop), name="alerts",
+                                   daemon=True)
+            job.start()
         yield
+        stop.set()
+        if job:
+            job.join(timeout=30)
         rw_pool.close()
         pool.close()
         http.close()
@@ -58,6 +69,8 @@ def create_app(settings: Settings | None = None, *, mailer: Mailer | None = None
     public.include_router(auth.router)
     api.include_router(lots.router(Conn))
     api.include_router(preferences.router)
+    api.include_router(saved.router)
+    api.include_router(alerts.router)
     app.include_router(public)
     app.include_router(api)
     return app

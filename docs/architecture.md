@@ -23,6 +23,9 @@ writable pool. The two never touch each other's tables.
 | `main.py` | `create_app()`: pools, mailer and HTTP client on `app.state`; routers; `/api/health` |
 | `lots.py` | The `Lot` contract, SQL and `/api/lots` routes (read-only pool): search, filters, counts |
 | `preferences.py` | `/api/me/lot-preferences`: a dealer's last lot filters and how often each is used |
+| `saved.py` | `/api/me/saved-lots`, `/api/me/saved-searches`: what a dealer saved, and what they switched on |
+| `alerts.py` | `/api/me/alert-settings`, `/api/me/alerts` (the inbox), and the alert job |
+| `alert_mail.py` | The alert emails, in English or Spanish, times in the dealer's zone |
 | `auth.py` | `/api/auth` routes and the `current_user` bearer dependency |
 | `accounts.py` | Storage in the `app` schema: users, sessions, tokens, identities, throttle |
 | `security.py` | Argon2id hashing, opaque tokens, breached-password check, Turnstile |
@@ -108,6 +111,10 @@ a Toyota, but "1500" is Ram's and GMC's, so it stays a word).
 | `oauth_states` | state → provider, PKCE verifier, nonce, `redirect_to`; deleted when used |
 | `throttle` | one row per counted event (`login:email:…`, `login:ip:…`, `code:email:…`, `code:ip:…`, `mail:…`) |
 | `lot_preferences` | per user: the lot list's last `filters` (a query string the web validates on use) and `usage`, how many times each list parameter was set or changed |
+| `saved_searches` | per user: a name, the lot list's query string (validated as `LotFilters`), `alerts`, and `matched_through`, after which first-seen lots are still to report |
+| `saved_lots` | per user and lot: the lot as saved (shown once the API database drops it), `change_alerts` with the sale time, sale day and Buy now the dealer was last told, the two reminder switches, when they were set and the sale time each last went out for |
+| `alert_settings` | per user: email on or off for each kind, once or twice a day, time zone and language (seeded by the dealer's first alert write, then theirs to change), the last summary slot |
+| `alerts` | the inbox: one row per email section (`matches`, `changes`, `reminder`) with its lots copied in, `read_at` |
 
 ## Auth flows
 
@@ -130,6 +137,41 @@ a Toyota, but "1500" is Ram's and GMC's, so it stays a word).
   exchanges the code, verifies the ID token (JWKS signature, issuer, audience, expiry,
   nonce), then finds the identity, or links it to the user with that verified email, or
   creates the user. Apple sends the name only on the first sign-in, as JSON in `user`.
+
+## Saved lots, saved searches and alerts
+
+Saving a lot copies it into `saved_lots`; the dealer's list shows each lot as the API database
+holds it now (a removed lot stays there until its auction is over) and, once it is purged, as it
+was saved, marked unavailable. Saving switches nothing on: change alerts, the 1-hour and 1-day
+reminders and a search's alerts each are. Turning change alerts on starts from what the lot says
+then; turning alerts on for a search, or giving it new filters, starts from now, so existing
+lots are never news.
+
+`alerts.loop` runs `alerts.tick` every `ALERTS_INTERVAL_SECONDS` (60) in a thread of the API
+process, under a Postgres advisory lock (`hashtext('api:alerts')`), so only one process runs it
+however many serve requests. One run:
+
+1. Clears the reminders of saved lots no longer listed (`removed_at`, or purged).
+2. For every listed saved lot, finds the reminders due — the auction's `sale_at` minus 1 hour
+   or 1 day has passed, the auction has not, the reminder was set before that time, and it has
+   not gone out for this `sale_at` — and, with change alerts on, a different sale time, sale
+   day or Buy now price (0 is none) than the dealer was last told. Per dealer, in one
+   transaction: an inbox entry per reminded lot with that lot's changes folded in, one entry for
+   the other changed lots, and the new "told" and "sent for" values. Then one email.
+3. For each dealer with a search's alerts on whose summary time (7:00, or 7:00 and 17:00, in
+   their zone) has come since `summary_at`: each such search's lots first seen in
+   (`matched_through`, cutoff], still listed and matching now, newest first. The cutoff is the
+   last sync (`ingest_sync.synced_at`, or now) minus 30 minutes, since a lot first seen just
+   before a sync may not have reached the API database yet; it then waits for the next summary.
+   Windows follow one another, so no lot is told twice and an older lot never becomes news
+   through an update. A lot matching several searches is listed once, under the first, naming
+   the others; each search lists 10 lots and links to the rest. One inbox entry, one email,
+   nothing at all when nothing is new.
+
+Each dealer's state is committed before their email is built and sent; a failure is logged and
+holds up nobody else, and the inbox keeps the alert (there is no retry yet). Emails are plain
+text in the dealer's language, with every time in their zone and named, and link to the web
+app (`WEB_URL`, under `/es` in Spanish).
 
 ## Outbound HTTP and mail
 

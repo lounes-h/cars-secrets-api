@@ -37,7 +37,9 @@ and restart the web development server after changing it.
 The Docker image also listens on port 8001. Publish it with `-p 8001:8001` when
 running the container; supply the database and other settings through the environment.
 
-Without `SMTP_HOST`, confirmation codes and reset links are printed in the log. Without
+The alert job (reminders, saved-lot changes, search summaries) runs inside the service every
+minute; `ALERTS_INTERVAL_SECONDS=0` turns it off. Without `SMTP_HOST`, its emails, confirmation
+codes and reset links are printed in the log. Without
 `TURNSTILE_SECRET`, the captcha is not enforced. Google and Apple sign-in answer
 `501 provider_not_configured` until their variables are set.
 
@@ -77,6 +79,13 @@ For a hosted API database, pipe the same dump into `psql "$DATABASE_URL"`.
 | `POST /api/auth/reset-password` | Sets the password from the emailed token, revokes all sessions |
 | `POST /api/auth/oauth/{google\|apple}/start` | `{authorize_url, state}` |
 | `POST /api/auth/oauth/{google\|apple}/callback` | `{token, expires_at, new_user, redirect_to}` |
+| `GET /api/me/saved-lots` | Bearer session. `{items: [{lot, available, saved_at, change_alerts, remind_hour, remind_day}]}`, last saved first; `available` is false once the auction no longer lists the lot, which then reads as it was saved |
+| `GET`, `PUT`, `DELETE /api/me/saved-lots/{source}/{lot_number}` | One saved lot (`404 not_saved`); `PUT {change_alerts?, remind_hour?, remind_day?, locale?, time_zone?}` saves a listed lot (`404 lot_not_found`, `409 limit_reached` past 500) and switches what it names; `DELETE` removes it with its alerts and reminders |
+| `GET`, `POST /api/me/saved-searches` | `{items: [{id, name, query, alerts, created_at}]}`, newest first; `POST {name, query, alerts?, locale?, time_zone?}` (`409 limit_reached` past 50) |
+| `PATCH`, `DELETE /api/me/saved-searches/{id}` | Rename, new filters, pause or resume alerts (`404 not_found`); delete |
+| `GET`, `PUT /api/me/alert-settings` | `{email_matches, email_changes, email_reminders, twice_daily, time_zone, locale}`; `time_zone` and `locale` are null until set |
+| `GET /api/me/alerts?kind=&limit=&offset=` | `{items: [{id, kind, payload, created_at, read}], total, unread}`, newest first; `kind` is `matches`, `changes` or `reminder` |
+| `GET /api/me/alerts/unread`, `POST /api/me/alerts/read` | `{unread}`; `POST {ids?}` marks those alerts read, or all without `ids` |
 | `GET`, `PUT /api/me/lot-preferences` | Bearer session. `{filters, usage}`: the lot list's last filters (a query string, ≤ 2000 characters) and how often the dealer set each one; `PUT {filters}` keeps them and counts each set or changed parameter |
 
 ## Development

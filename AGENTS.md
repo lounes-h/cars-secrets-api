@@ -52,6 +52,8 @@ See `docs/architecture.md` for details.
 - `lots` there holds the active lots, plus removed lots until their auction is over (sale time
   + 4 h), with only the served columns: no `attributes`, row hashes, `last_seen_at` or file
   ids.
+- Saved lots and alerts join `app` tables with `public.lots` on the read-write pool; that code
+  only ever reads `public`, never writes it.
 - This API owns the `app` schema (accounts), written through `app.state.rw_pool`
   (`auth.RwConn`) and migrated by `migrations/versions/NNNN_description.py`: raw SQL via
   `op.execute`, never importing application code, never touching `public`. Never edit a
@@ -60,6 +62,11 @@ See `docs/architecture.md` for details.
 - Routes live under `/api` on two routers in `app/main.py`: `public` (health, auth) and `api`
   (lots). A route for a signed-in dealer declares `user: auth.User` (bearer session); do not
   reimplement session checks.
+- Saved lots and searches are in `app/saved.py`; alert settings, the inbox and the alert job in
+  `app/alerts.py`, its emails (English and Spanish) in `app/alert_mail.py`. The job runs in the
+  API process every `ALERTS_INTERVAL_SECONDS` (0 = off, as in the tests, which call
+  `alerts.tick` with a clock of their own); a Postgres advisory lock keeps it to one process.
+  Saving notifies nobody: change alerts, reminders and a search's alerts are each switched on.
 - Auth flows are in `app/auth.py`, storage in `app/accounts.py`, primitives in
   `app/security.py`, `app/mail.py` and `app/oauth.py`. Outbound HTTP goes through
   `app.state.http` and mail through `app.state.mailer`, so tests can substitute both via
@@ -71,7 +78,8 @@ See `docs/architecture.md` for details.
   (`auth.field_error`).
 - SQL is raw and always parameterized. Only code constants (column lists, fixed WHERE
   fragments) are interpolated; LIKE patterns go through `escape_like`.
-- Only active lots (`removed_at IS NULL`) are served.
+- Only active lots (`removed_at IS NULL`) are served, except in a dealer's own saved lots, which
+  keep a lot the auction dropped, marked `available: false`.
 - Deal arithmetic (cost, profit, margin, max bid) currently lives in the web repo
   (`src/lib/deal.ts`); do not port it here until the user asks.
 
@@ -169,8 +177,15 @@ Copart. Each lot carries `predicted_final_price`, estimated by the ingest's mode
 trained on generated sold prices until real ones exist, and the field is `null` until a model is
 deployed.
 
+Saved lots and searches, and their alerts (`/api/me/saved-lots`, `/api/me/saved-searches`,
+`/api/me/alerts`, `/api/me/alert-settings`): reminders 1 hour and 1 day before the auction's
+scheduled start (once per schedule, so they follow it when it moves; a lot no longer listed
+cancels them), a saved lot's auction time and Buy now changes at the next run of the job (a
+minute), and new lots matching a saved search in a summary at 7:00, or 7:00 and 17:00, in the
+dealer's zone. Each lands in the dealer's inbox, and by email unless Settings turns that kind off.
+
 Not done: terms of use and privacy policy documents, profile editing, email change, account
-deletion, MFA, saved lots, saved searches, alerts, deal analysis. CORS is not enabled; the web app
+deletion, MFA, deal analysis, alerts by text message, retrying a failed alert email. CORS is not enabled; the web app
 calls the API from its server.
 
 ## Branching
