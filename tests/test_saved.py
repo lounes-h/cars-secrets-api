@@ -23,8 +23,7 @@ def search(client, headers, **body):
 
 
 def test_saved_routes_need_a_signed_in_dealer(client):
-    for method, path in [("get", "/api/me/saved-lots"), ("get", "/api/me/saved-lots/keys"),
-                         ("get", "/api/me/saved-lots/copart/1"),
+    for method, path in [("get", "/api/me/saved-lots"), ("get", "/api/me/saved-lots/copart/1"),
                          ("put", "/api/me/saved-lots/copart/1"),
                          ("delete", "/api/me/saved-lots/copart/1"),
                          ("get", "/api/me/saved-searches"), ("post", "/api/me/saved-searches")]:
@@ -44,8 +43,6 @@ def test_saving_a_lot_switches_nothing_on(client, mailer, conn):
     assert (item["change_alerts"], item["remind_hour"], item["remind_day"]) == (False,) * 3
     assert client.get("/api/me/saved-lots", headers=headers).json()["items"] == [item]
     assert client.get("/api/me/saved-lots/copart/1", headers=headers).json() == item
-    assert client.get("/api/me/saved-lots/keys", headers=headers).json() == {
-        "keys": [{"source": "copart", "lot_number": "1"}]}
 
 
 def test_saving_again_keeps_one_and_unsaved_lots_are_not_found(client, mailer, conn):

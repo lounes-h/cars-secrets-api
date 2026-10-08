@@ -12,7 +12,7 @@ from psycopg.types.json import Jsonb
 from pydantic import AfterValidator, BaseModel, Field, StringConstraints, ValidationError
 
 from .auth import RwConn, User, error
-from .lots import COLUMNS, Lot, LotFilters, LotKey, to_lot, zone
+from .lots import COLUMNS, Lot, LotFilters, to_lot, zone
 
 router = APIRouter(prefix="/me", tags=["saved"])
 
@@ -53,10 +53,6 @@ class SavedLots(BaseModel):
     items: list[SavedLot]
 
 
-class LotKeys(BaseModel):
-    keys: list[LotKey]
-
-
 class SavedLotIn(Context):
     """What to switch on or off; anything left out stays as it is."""
 
@@ -95,14 +91,6 @@ def saved_lots(conn: psycopg.Connection, user_id: Any,
 @router.get("/saved-lots")
 def list_saved_lots(user: User, conn: RwConn) -> SavedLots:
     return SavedLots(items=saved_lots(conn, user["id"]))
-
-
-@router.get("/saved-lots/keys")
-def saved_lot_keys(user: User, conn: RwConn) -> LotKeys:
-    """Which lots the dealer saved, to mark them in a list."""
-    rows = conn.execute("SELECT source, lot_number FROM app.saved_lots WHERE user_id = %s "
-                        "ORDER BY saved_at DESC", (user["id"],))
-    return LotKeys(keys=[LotKey(**row) for row in rows])
 
 
 @router.get("/saved-lots/{source}/{lot_number}")
