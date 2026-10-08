@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     turnstile_secret: str = Field(default="", repr=False)
     check_breached_passwords: bool = True
 
+    # How often the alert job runs in the API process (reminders, saved-lot changes, search
+    # summaries; app/alerts.py). 0 turns it off, as the tests do to run it themselves.
+    alerts_interval_seconds: float = 60
+
     # Outgoing mail; without smtp_host, messages are logged instead of sent.
     smtp_host: str = ""
     smtp_port: int = 587

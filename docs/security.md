@@ -5,6 +5,14 @@
 - `/api/lots` and `/api/health` are public and read-only. `/api/auth/*` is public by nature;
   `logout` and `me` need a bearer session. Routes for signed-in dealers declare
   `user: auth.User`; `/api/me/lot-preferences` reads and writes only the caller's own row.
+- `/api/me/saved-lots`, `/api/me/saved-searches`, `/api/me/alerts` and `/api/me/alert-settings`
+  read and write only the caller's rows: every statement filters on the session's user, so
+  another dealer's search id or alert id changes nothing (a 404, or no row marked read). Saved
+  searches are validated as `LotFilters` and capped (name 80 characters, query 2000); an account
+  keeps at most 50 searches and 500 lots (`409 limit_reached`).
+- Alert emails go only to a confirmed address, the account's own; they carry no token and link
+  only to `WEB_URL`. The saved search's name is the dealer's own text, sent back to them in plain
+  text.
 - Lot filters are typed (`LotFilters`): enumerated values, at most 50 values per list, capped
   text. Their SQL is built from code constants and every value is a parameter; the stored
   preference string is capped at 2000 characters and only known parameters are counted.
@@ -89,7 +97,9 @@ names.
 
 - The API has its own database. Its `public` tables (lots, filled by the ingest worker) are
   read through connections opened with `default_transaction_read_only=on`; the `app` schema is
-  written through a separate pool. The ingest database is never reachable from the API, and
+  written through a separate pool, which saved lots and alerts also use to read `lots` in the
+  same query as their own tables (they never write `public`). The ingest database is never
+  reachable from the API, and
   the lots copy carries no raw export data (`attributes`). Before deploying beyond localhost,
   give the API a role that can only read `public` and write `app`, separate from the ingest
   worker's role, and require TLS (`sslmode=require`) to a hosted database.

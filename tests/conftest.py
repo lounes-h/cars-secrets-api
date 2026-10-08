@@ -70,6 +70,7 @@ def settings(db_url: str) -> Settings:
     return Settings(
         _env_file=None, database_url=db_url, web_url="https://web.test",
         internal_api_key="k" * 32, check_breached_passwords=False,
+        alerts_interval_seconds=0,  # tests run the alert job themselves (alerts.tick)
     )
 
 
