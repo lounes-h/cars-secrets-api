@@ -44,9 +44,13 @@ def test_alert_routes_need_a_signed_in_dealer(client):
         assert client.request(method, path, json={}).status_code == 401, path
 
 
-def test_settings_start_unchosen_and_are_kept(client, mailer):
+def test_settings_start_from_registration_and_are_kept(client, mailer, conn):
     headers = dealer(client, mailer)
 
+    assert client.get("/api/me/alert-settings", headers=headers).json() == {
+        "email_matches": True, "email_changes": True, "email_reminders": True,
+        "twice_daily": False, "time_zone": "UTC", "locale": "en"}
+    conn.execute("DELETE FROM app.alert_settings")  # a Google or Apple sign-up has none
     assert client.get("/api/me/alert-settings", headers=headers).json() == {
         "email_matches": True, "email_changes": True, "email_reminders": True,
         "twice_daily": False, "time_zone": None, "locale": None}
@@ -585,28 +589,46 @@ def test_one_dealers_failure_holds_up_nobody_else(client, mailer, conn, caplog, 
 
     with caplog.at_level(logging.ERROR, logger="app.alerts"):
         run(client, "2026-10-08T14:00Z")
+        assert len(mailer.sent) == start + 1, "the other dealer still gets theirs"
+        assert len(inbox(conn)) == 1, "nothing of the first dealer's run was kept"
         run(client, "2026-10-08T14:01Z")
 
-    assert len(mailer.sent) == start + 1, "the other dealer still gets theirs, and nobody twice"
+    assert sorted(to for to, _, _ in mailer.sent[start:]) == [
+        "dana@example.com", "eve@example.com"], "the first dealer's at the next run, nobody twice"
     assert len(inbox(conn)) == 2 and "breaks" in caplog.text
 
 
-def test_a_failed_send_keeps_the_alert_and_is_not_repeated(client, mailer, conn, caplog,
-                                                           monkeypatch):
+def test_a_failed_send_keeps_the_alert_and_is_tried_again(client, mailer, conn, caplog):
     reminded(client, mailer, conn)
-
-    def down(*args):
-        raise OSError("smtp down")
-
-    monkeypatch.setattr(mailer, "send", down)
-    with caplog.at_level(logging.ERROR, logger="app.alerts"):
-        run(client, "2026-10-08T14:00Z")
-    monkeypatch.undo()
     start = len(mailer.sent)
+    mailer.failures = 1
+
+    with caplog.at_level(logging.WARNING, logger="app.outbox"):
+        run(client, "2026-10-08T14:00Z")
+    assert mailer.sent[start:] == [] and len(inbox(conn)) == 1
+    assert "attempt 1" in caplog.text and "Connection unexpectedly closed" in caplog.text
+    run(client, "2026-10-08T14:00:30Z")
+    assert mailer.sent[start:] == [], "the next try waits a minute"
     run(client, "2026-10-08T14:01Z")
 
-    assert len(inbox(conn)) == 1 and "smtp down" in caplog.text
-    assert mailer.sent[start:] == []
+    assert len(mailer.sent) == start + 1 and len(inbox(conn)) == 1, "sent once, stored once"
+    assert conn.execute("SELECT count(*) AS n FROM app.outbox").fetchone()["n"] == 0
+
+
+def test_a_reminder_still_unsent_when_the_auction_starts_is_dropped(client, mailer, conn,
+                                                                    caplog):
+    reminded(client, mailer, conn)
+    start = len(mailer.sent)
+    mailer.failures = 4
+
+    with caplog.at_level(logging.WARNING, logger="app.outbox"):
+        for now in ("14:00", "14:01", "14:06", "14:21"):
+            run(client, f"2026-10-08T{now}Z")
+        run(client, "2026-10-08T15:00Z")
+
+    assert mailer.sent[start:] == [] and len(inbox(conn)) == 1
+    assert "expired unsent after 4 attempts" in caplog.text
+    assert conn.execute("SELECT count(*) AS n FROM app.outbox").fetchone()["n"] == 0
 
 
 def test_only_one_process_runs_the_job_at_a_time(client, mailer, conn, db_url):

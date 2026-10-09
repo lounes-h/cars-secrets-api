@@ -48,7 +48,8 @@ class Settings(BaseSettings):
     check_breached_passwords: bool = True
 
     # How often the alert job runs in the API process (reminders, saved-lot changes, search
-    # summaries; app/alerts.py). 0 turns it off, as the tests do to run it themselves.
+    # summaries; app/alerts.py), which also retries failed emails (app/outbox.py). 0 turns it
+    # off, as the tests do to run it themselves.
     alerts_interval_seconds: float = 60
 
     # Outgoing mail; without smtp_host, messages are logged instead of sent.
@@ -56,7 +57,7 @@ class Settings(BaseSettings):
     smtp_port: int = 587
     smtp_username: str = ""
     smtp_password: str = Field(default="", repr=False)
-    mail_from: str = "Car's Secrets <no-reply@localhost>"
+    mail_from: str = "CarBidInsight <no-reply@localhost>"
 
     google_client_id: str = ""
     google_client_secret: str = Field(default="", repr=False)

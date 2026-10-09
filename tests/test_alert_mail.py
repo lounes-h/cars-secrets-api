@@ -41,13 +41,15 @@ def test_several_reminders_and_a_buy_now_taken_away():
     withdrawn = {"lot": LOT | {"lot_number": "8"},
                  "changes": {"buy_now": {"from": 9500.0, "to": None}}}
 
-    subject, body = alert_mail.news_mail([reminder, reminder], [withdrawn], "en", NEW_YORK,
-                                         "https://web.test")
+    subject, body, page = alert_mail.news_mail([reminder, reminder], [withdrawn], "en",
+                                               NEW_YORK, "https://web.test")
 
     assert subject == "Auction reminders: 2 saved lots"
     assert "2021 HONDA CIVIC EX\n  Lot 7 · Copart · DALLAS, TX" in body
     assert "Buy now: $9,500 → not offered" in body
     assert "https://web.test/active-lots/copart/8\n" in body
+    assert '<a href="https://web.test/active-lots/copart/8"' in page
+    assert ">2021 HONDA CIVIC EX</a>" in page and ">Your alerts</a>" in page
 
 
 def test_a_summary_in_spanish():
@@ -56,7 +58,7 @@ def test_a_summary_in_spanish():
     payload = {"total": 3, "searches": [
         {"id": "s1", "name": "Hondas", "query": "", "total": 3, "lots": [found, unbid]}]}
 
-    subject, body = alert_mail.summary_mail(payload, "es", MEXICO, "https://web.test")
+    subject, body, page = alert_mail.summary_mail(payload, "es", MEXICO, "https://web.test")
 
     assert subject == "3 lotes nuevos coinciden con tus búsquedas guardadas"
     assert "Hondas: 3 lotes nuevos" in body
@@ -65,3 +67,17 @@ def test_a_summary_in_spanish():
     assert "Subasta: jue 8 oct, 9:00 a. m. CST\n  https://web.test/es/active-lots/copart/8" in body
     assert "Ver los 3: https://web.test/es/active-lots\n" in body
     assert "Tus alertas: https://web.test/es/alerts" in body
+
+
+def test_what_dealers_and_auctions_wrote_is_escaped_in_the_html():
+    lot = LOT | {"make": "<b>HONDA</b>", "searches": ['<script>alert("x")</script>']}
+    payload = {"total": 1, "searches": [{"id": "s1", "name": '<script>alert("x")</script>',
+                                         "query": "make=A&b=<c>", "total": 2, "lots": [lot]}]}
+
+    subject, body, page = alert_mail.summary_mail(payload, "en", UTC, "https://web.test")
+
+    assert "<script>" not in page and "<b>HONDA" not in page
+    assert "&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;: 2 new lots" in page
+    assert "2021 &lt;b&gt;HONDA&lt;/b&gt; CIVIC EX" in page
+    assert 'href="https://web.test/active-lots?make=A&amp;b=%3Cc%3E"' in page
+    assert '<script>alert("x")</script>: 2 new lots' in body, "plain text is shown as text"

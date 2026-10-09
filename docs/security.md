@@ -11,8 +11,13 @@
   searches are validated as `LotFilters` and capped (name 80 characters, query 2000); an account
   keeps at most 50 searches and 500 lots (`409 limit_reached`).
 - Alert emails go only to a confirmed address, the account's own; they carry no token and link
-  only to `WEB_URL`. The saved search's name is the dealer's own text, sent back to them in plain
-  text.
+  only to `WEB_URL`. The saved search's name is the dealer's own text, sent back to them as
+  text; every value an email's HTML shows, the auction's included, is escaped.
+- Email waiting in `app.outbox` is encrypted with AES-GCM under a key derived from
+  `EMAIL_CODE_SECRET` and bound to its address, so the table never shows a live code or reset
+  link, and a body cannot be moved to another address. A sent email is deleted, and one that
+  cannot be sent is dropped with its code or link, at the latest. Logs name an email by its id
+  and kind, never its address.
 - Lot filters are typed (`LotFilters`): enumerated values, at most 50 values per list, capped
   text. Their SQL is built from code constants and every value is a parameter; the stored
   preference string is capped at 2000 characters and only known parameters are counted.
@@ -82,7 +87,8 @@ both, so throttling applies to visitors and not to the web server's address.
 
 Reset tokens (1 h) are random, stored hashed, single use, bound to a purpose. Links point at
 the web app, whose page needs a click before consuming a token, so mail scanners that
-prefetch links do not.
+prefetch links do not. A reset mails the account a "password changed" notice with a way to
+reset it again, so a takeover does not go unnoticed.
 
 ## Social login
 
@@ -110,5 +116,6 @@ names.
 
 `DATABASE_URL`, `INTERNAL_API_KEY`, `EMAIL_CODE_SECRET`, `TURNSTILE_SECRET`, `SMTP_PASSWORD`, `GOOGLE_CLIENT_SECRET`
 and `APPLE_PRIVATE_KEY` live in `.env`, which is git-ignored; `.env.example` holds the names
-only. Request bodies and tokens are never logged; the log mailer (development only) prints
-confirmation codes and reset links.
+only. `EMAIL_CODE_SECRET` keys both the stored confirmation codes and the outbox, so changing it
+voids the live codes and drops the email still waiting. Request bodies and tokens are never
+logged; the log mailer (development only) prints confirmation codes and reset links.

@@ -20,16 +20,17 @@ writable pool. The two never touch each other's tables.
 |---|---|
 | `config.py` | `Settings` from the environment |
 | `db.py` | The two psycopg pools (`make_pool(read_only=...)`), `run_migrations` |
-| `main.py` | `create_app()`: pools, mailer and HTTP client on `app.state`; routers; `/api/health` |
+| `main.py` | `create_app()`: pools, mailer, outbox key and HTTP client on `app.state`; routers; `/api/health` |
 | `lots.py` | The `Lot` contract, SQL and `/api/lots` routes (read-only pool): search, filters, counts |
 | `preferences.py` | `/api/me/lot-preferences`: a dealer's last lot filters and how often each is used |
 | `saved.py` | `/api/me/saved-lots`, `/api/me/saved-searches`: what a dealer saved, and what they switched on |
 | `alerts.py` | `/api/me/alert-settings`, `/api/me/alerts` (the inbox), and the alert job |
 | `alert_mail.py` | The alert emails, in English or Spanish, times in the dealer's zone |
+| `outbox.py` | Outgoing email kept until sent: `queue` in the caller's transaction, `flush` sends and retries |
 | `auth.py` | `/api/auth` routes and the `current_user` bearer dependency |
-| `accounts.py` | Storage in the `app` schema: users, sessions, tokens, identities, throttle |
+| `accounts.py` | Storage in the `app` schema: users, sessions, tokens, identities, throttle; the dealer's language and zone (`seed_settings`, `email_locale`) |
 | `security.py` | Argon2id hashing, opaque tokens, breached-password check, Turnstile |
-| `mail.py` | `Mailer` (SMTP or log) and the account email texts |
+| `mail.py` | `Mailer` (SMTP or log), the blocks every email is built from (plain text and HTML), and the account emails in English or Spanish |
 | `oauth.py` | Google / Apple OpenID Connect: authorize URL, PKCE, code exchange, ID token check |
 | `migrations/` | Alembic, raw SQL in `versions/NNNN_description.py` |
 
@@ -113,14 +114,16 @@ a Toyota, but "1500" is Ram's and GMC's, so it stays a word).
 | `lot_preferences` | per user: the lot list's last `filters` (a query string the web validates on use) and `usage`, how many times each list parameter was set or changed |
 | `saved_searches` | per user: a name, the lot list's query string (validated as `LotFilters`), `alerts`, and `matched_through`, after which first-seen lots are still to report |
 | `saved_lots` | per user and lot: the lot as saved (shown once the API database drops it), `change_alerts` with the sale time, sale day and Buy now the dealer was last told, the two reminder switches, when they were set and the sale time each last went out for |
-| `alert_settings` | per user: email on or off for each kind, once or twice a day, time zone and language (seeded by the dealer's first alert write, then theirs to change), the last summary slot |
+| `alert_settings` | per user: email on or off for each kind, once or twice a day, time zone and language (seeded at registration, or by the first alert write of a Google or Apple account, then theirs to change; the language is every email's), the last summary slot |
 | `alerts` | the inbox: one row per email section (`matches`, `changes`, `reminder`) with its lots copied in, `read_at` |
+| `outbox` | email not yet sent: kind, address, the encrypted body, `send_after`, `attempts`, `expires_at`, `last_error`; deleted once sent or dropped |
 
 ## Auth flows
 
-- **Register** → user row (unverified) + a six-digit code (`auth.send_code`) mailed to the
-  address, with no link. An existing address gets an "account exists" mail instead, and the
-  response is identical. **Verify** takes `{email, code}`, confirms the address and returns a
+- **Register** → user row (unverified), its settings seeded with the page's `locale` and the
+  browser's `time_zone` (both required), + a six-digit code (`auth.send_code`) mailed to the
+  address, with no link. An existing address gets an "account exists" mail instead, in its
+  owner's language, and the response is identical. **Verify** takes `{email, code}`, confirms the address and returns a
   session like login does. A new code replaces the last one; **resend-verification** and a
   login with the right password on an unconfirmed account both send one (at most one a
   minute), and that login still answers `403 email_unverified`.
@@ -130,7 +133,10 @@ a Toyota, but "1500" is Ram's and GMC's, so it stays a word).
   instead of 12 hours idle; every use slides the expiry.
 - Mails that anyone can trigger for an address they do not own (verification, the "you already have an account" hint, password reset) go through `auth.mail_allowed`, which caps them per address and per client.
 - **Forgot / reset**: a `reset_password` token by mail; reset sets the new hash, marks the
-  address verified and revokes every session of the user.
+  address verified, revokes every session of the user and mails a "password changed" notice
+  with a way to reset it again.
+- Every account email is in the language `alert_settings` holds (`accounts.email_locale`),
+  English for an account without one, and links to the web app's pages in it.
 - **Social login**: `start` stores `(state, nonce, PKCE verifier)` and returns the provider's
   authorize URL with redirect URI `WEB_URL/auth/callback/{provider}`. The web app receives the
   provider's redirect (Apple posts it) and calls `callback` with `code` and `state`. The API
@@ -157,7 +163,7 @@ however many serve requests. One run:
    not gone out for this `sale_at` — and, with change alerts on, a different sale time, sale
    day or Buy now price (0 is none) than the dealer was last told. Per dealer, in one
    transaction: an inbox entry per reminded lot with that lot's changes folded in, one entry for
-   the other changed lots, and the new "told" and "sent for" values. Then one email.
+   the other changed lots, the new "told" and "sent for" values, and one email.
 3. For each dealer with a search's alerts on whose summary time (7:00, or 7:00 and 17:00, in
    their zone) has come since `summary_at`: each such search's lots first seen in
    (`matched_through`, cutoff], still listed and matching now, newest first. The cutoff is the
@@ -167,17 +173,30 @@ however many serve requests. One run:
    through an update. A lot matching several searches is listed once, under the first, naming
    the others; each search lists 10 lots and links to the rest. One inbox entry, one email,
    nothing at all when nothing is new.
+4. Sends every email that is due (`outbox.flush`), from this run or an earlier failure.
 
-Each dealer's state is committed before their email is built and sent; a failure is logged and
-holds up nobody else, and the inbox keeps the alert (there is no retry yet). Emails are plain
-text in the dealer's language, with every time in their zone and named, and link to the web
-app (`WEB_URL`, under `/es` in Spanish).
+Each dealer's inbox entries, state and email are committed together; a failure is logged,
+holds up nobody else, and leaves that dealer's alerts to the next run. Emails are in the
+dealer's language, with every time in their zone and named, and link to the web app
+(`WEB_URL`, under `/es` in Spanish).
 
 ## Outbound HTTP and mail
 
 `app.state.http` (one `httpx.Client`) is used for Turnstile, Have I Been Pwned and the OAuth
 token endpoints; `app.state.mailer` for email. Tests pass a `MockTransport` and a capturing
 mailer through `create_app(settings, mailer=..., http=...)`.
+
+No route or job calls the mailer itself. Each email is built from `mail.py`'s blocks, which
+carry their plain text and their HTML (one table layout with inline styles, grayscale, the
+logo from `WEB_URL/logo.png`, everything given escaped), and goes out as both
+(`multipart/alternative`). It is stored in `app.outbox` (`outbox.queue`), in the same
+transaction as what it reports, then sent: the auth routes send theirs at once, the alert job
+everything due after each run. A sender leases its rows for 5 minutes (`FOR UPDATE SKIP
+LOCKED`), so no two processes send the same email and one that dies leaves its rows to the
+next. A sent email is deleted; a failed one waits 1, 5, 15, then 60 minutes, and is dropped
+after the fifth attempt or once it expires: a code with its code (10 minutes), a reset link
+with its token (1 hour), a reminder when its auction starts, anything else after a day. A new
+confirmation code replaces an unsent one, which no longer works.
 
 ## Tests
 

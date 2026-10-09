@@ -71,6 +71,12 @@ See `docs/architecture.md` for details.
   `app/security.py`, `app/mail.py` and `app/oauth.py`. Outbound HTTP goes through
   `app.state.http` and mail through `app.state.mailer`, so tests can substitute both via
   `create_app(settings, mailer=..., http=...)`.
+- Email: build it from `app/mail.py`'s blocks (each carries its plain text and its HTML; the
+  HTML escapes what it is given), with words in English and Spanish, and never call the mailer
+  directly: `outbox.queue` it in the transaction of what it reports, then `outbox.flush`
+  (`auth.send_mail` does both). It goes out in the language `alert_settings` holds
+  (`accounts.email_locale`), which registration sets from the page's; links go through
+  `mail.page`, which puts Spanish pages under `/es`.
 - Responses are explicit pydantic models or plain dicts with a fixed shape (`app/lots.py`,
   `auth.public_user`). Never expose the raw `attributes` JSONB, password hashes or token
   hashes. Amounts serialize as JSON numbers. Errors are
@@ -100,7 +106,7 @@ Alembic, raw SQL, `app` schema only (`migrations/`, version table `app.alembic_v
 Tests sit in `tests/` and run against a real PostgreSQL. `tests/schema.sql` is a copy of the
 tables the ingest worker creates in the API database (`api_sync.ensure_schema`); refresh it
 when the ingest adds a column the API exposes. Fixtures in `tests/conftest.py`: `conn` (fresh database), `settings`, `mailer`
-(captures messages, `last_link(path)` extracts a token, `last_code()` the confirmation code), `http_handler` (set `.fn` to script
+(captures messages, `last_link(path)` extracts a token, `last_code()` the confirmation code, `failures` makes the next sends fail), `http_handler` (set `.fn` to script
 Turnstile / HIBP / OAuth responses), `client` (`TestClient` over `create_app` with those
 fakes), `insert_lot`.
 
@@ -171,7 +177,11 @@ moved over once, see README); read-only lots (`/api/lots` with search, filters, 
 counts, search interpretation and how many lots were added or changed lately (`/api/lots/activity`); a dealer's last filters in `/api/me/lot-preferences`), accounts (register with terms acceptance and optional
 E.164 phone, email confirmation by a six-digit code that also signs the dealer in, login with remember-me and captcha after repeated failures,
 logout, me, forgot / reset password), Google and Apple sign-in (built and tested with fakes;
-they need credentials in `.env` to be offered). Mail goes to the log until `SMTP_*` is set;
+they need credentials in `.env` to be offered). Every email (the confirmation code, the
+"account exists" hint, the reset link, the "password changed" notice and the alerts) is plain
+text and HTML, says CarBidInsight, is in the dealer's language (set at registration, then in
+Settings), and goes through the outbox, which retries a failed send (README: Sending email in
+production). Mail goes to the log until `SMTP_*` is set;
 the captcha is enforced only with `TURNSTILE_SECRET`. The only provider in the lot data is
 Copart. Each lot carries `predicted_final_price`, estimated by the ingest's model. That model is
 trained on generated sold prices until real ones exist, and the field is `null` until a model is
@@ -185,7 +195,8 @@ minute), and new lots matching a saved search in a summary at 7:00, or 7:00 and 
 dealer's zone. Each lands in the dealer's inbox, and by email unless Settings turns that kind off.
 
 Not done: terms of use and privacy policy documents, profile editing, email change, account
-deletion, MFA, deal analysis, alerts by text message, retrying a failed alert email. CORS is not enabled; the web app
+deletion, MFA, deal analysis, alerts by text message, lot photos in alert emails, a one-click
+unsubscribe header. CORS is not enabled; the web app
 calls the API from its server.
 
 ## Branching
