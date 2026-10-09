@@ -1,3 +1,9 @@
+## [0.5.0](https://github.com/lounes-h/cars-secrets-api/compare/v0.4.1...v0.5.0) (2026-10-09)
+
+### Features
+
+* tell dealers waiting with reminders when a future sale gets its date ([56771d6](https://github.com/lounes-h/cars-secrets-api/commit/56771d60e83f5bc49fd0b0afcd1ba4b6ee0a0857))
+
 ## [0.4.1](https://github.com/lounes-h/cars-secrets-api/compare/v0.4.0...v0.4.1) (2026-10-09)
 
 ### Bug fixes
