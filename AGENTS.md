@@ -194,6 +194,9 @@ cancels them), a saved lot's auction time and Buy now changes at the next run of
 minute), a future sale given its date to a dealer with reminders on it even without change alerts,
 and new lots matching a saved search in a summary at 7:00, or 7:00 and 17:00, in the
 dealer's zone. Each lands in the dealer's inbox, and by email unless Settings turns that kind off.
+A changes email's subject names what changed ("Buy now price changed: 2013 ACURA TSX", "Auction
+date set and Buy now price changed on 2 saved lots"), as the web's inbox heading does, and every
+change in an alert email sits on a grey ground with its new value in bold.
 
 Not done: terms of use and privacy policy documents, profile editing, email change, account
 deletion, MFA, deal analysis, alerts by text message, lot photos in alert emails, a one-click

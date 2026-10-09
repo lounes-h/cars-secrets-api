@@ -67,6 +67,35 @@ def test_a_future_sale_given_its_date_reads_as_set():
     assert "Auction date set: Oct 9, 2026" in body and "Future sale" not in body
     assert "Fecha de subasta fijada: 9 oct 2026" in cuerpo
 
+def test_what_changed_heads_the_email_and_its_new_value_stands_out():
+    unset = {"at": None, "date": None}
+    cheaper = {"lot": LOT, "changes": {"buy_now": {"from": 9500.0, "to": 8900.0}}}
+    both = {"lot": LOT | {"lot_number": "8"}, "changes": {
+        "sale": {"from": unset, "to": {"at": None, "date": "2026-10-09"}},
+        "buy_now": {"from": None, "to": 4000.0}}}
+
+    subject, body, page = alert_mail.news_mail([], [cheaper], "en", NEW_YORK, "https://web.test")
+    asunto, cuerpo, _ = alert_mail.news_mail([], [cheaper, both], "es", MEXICO,
+                                             "https://web.test")
+
+    assert subject == "Buy now price changed: 2021 HONDA CIVIC EX"
+    assert "Buy now price changed\n  2021 HONDA CIVIC EX" in body, "and heads the lot's section"
+    assert "<div>Buy now: $9,500 → <strong>$8,900</strong></div>" in page
+    assert asunto == ("Fecha de subasta fijada y cambió el precio de compra inmediata en 2 lotes "
+                      "guardados")
+    assert "Fecha de subasta fijada y cambió el precio de compra inmediata\n" in cuerpo
+
+
+def test_a_date_set_on_one_lot_and_moved_on_another_reads_as_changed():
+    unset, dated = {"at": None, "date": None}, {"at": None, "date": "2026-10-09"}
+    later = {"at": None, "date": "2026-10-10"}
+
+    assert alert_mail.what([{"sale": {"from": unset, "to": dated}},
+                            {"sale": {"from": dated, "to": later}}], "en") == "Auction date changed"
+    assert alert_mail.what([{"sale": {"from": unset, "to": dated}}], "es") == (
+        "Fecha de subasta fijada")
+
+
 def test_a_summary_in_spanish():
     found = LOT | {"high_bid": 1500.0, "buy_it_now_price": 4000.0, "searches": ["Hondas"]}
     unbid = LOT | {"lot_number": "8", "searches": ["Hondas"]}  # no bid yet, no Buy now
