@@ -1,3 +1,9 @@
+## [0.4.1](https://github.com/lounes-h/cars-secrets-api/compare/v0.4.0...v0.4.1) (2026-10-09)
+
+### Bug fixes
+
+* drop "to take the account back" from the password-changed email ([5115c40](https://github.com/lounes-h/cars-secrets-api/commit/5115c40fc64b5e0393a2b7c21c1192f9d6ea4103))
+
 ## [0.4.0](https://github.com/lounes-h/cars-secrets-api/compare/v0.3.0...v0.4.0) (2026-10-09)
 
 ### Features
