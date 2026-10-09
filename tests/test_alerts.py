@@ -224,7 +224,7 @@ def test_a_future_sale_given_its_date_tells_a_dealer_waiting_with_reminders(clie
     run(client, "2026-10-08T12:01Z")
 
     [(_, subject, body)] = mailer.sent[start:]
-    assert subject == "A saved lot changed: 2020 TOYOTA CAMRY"
+    assert subject == "A saved lot changed: 2020 TOYOTA CAMRY · Auction date set"
     assert "Auction date set: Mon, Oct 12, 3:00 PM UTC" in body
     assert "Buy now" not in body, "Buy now changes are for change alerts"
     [entry] = inbox(conn)
@@ -263,7 +263,7 @@ def test_a_change_goes_out_at_the_next_run_and_once(client, mailer, conn):
     run(client, "2026-10-08T12:01Z")
 
     [(_, subject, body)] = mailer.sent[start:]
-    assert subject == "A saved lot changed: 2020 TOYOTA CAMRY"
+    assert subject == "A saved lot changed: 2020 TOYOTA CAMRY · Auction date changed"
     assert "Auction: Fri, Oct 9, 3:00 PM UTC → Sat, Oct 10, 4:00 PM UTC" in body
     [entry] = inbox(conn)
     [lot] = entry["payload"]["lots"]
@@ -295,7 +295,7 @@ def test_changes_to_several_lots_make_one_email(client, mailer, conn):
     run(client, "2026-10-08T12:00Z")
 
     [(_, subject, body)] = mailer.sent[start:]
-    assert subject == "2 saved lots changed"
+    assert subject == "2 saved lots changed · Auction date changed and Buy now price changed"
     assert "Auction: Fri, Oct 9, 3:00 PM UTC → Future sale" in body
     assert "Buy now: $9,500 → $8,900" in body and "Buy now: not offered → $4,000" in body
     [entry] = inbox(conn)
@@ -375,7 +375,8 @@ def test_a_change_is_emailed_even_when_its_reminder_is_not(client, mailer, conn)
     run(client, "2026-10-08T12:00Z")
 
     [(_, subject, body)] = mailer.sent[start:]
-    assert subject == "A saved lot changed: 2020 TOYOTA CAMRY" and "reminder" not in body.lower()
+    assert subject == "A saved lot changed: 2020 TOYOTA CAMRY · Auction date changed" and (
+        "reminder" not in body.lower())
     assert [entry["kind"] for entry in inbox(conn)] == ["reminder"]
 
 

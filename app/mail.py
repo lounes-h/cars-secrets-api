@@ -8,6 +8,7 @@ auction is escaped. The words follow the web's (src/messages), in the dealer's l
 import html
 import logging
 import smtplib
+from collections.abc import Sequence
 from email.message import EmailMessage
 from typing import Any, NamedTuple, Protocol
 
@@ -115,11 +116,16 @@ def section(heading: str, blocks: list[Block]) -> Block:
         + "".join(block.html for block in blocks) + "</div>"))
 
 
-def lot(name: str, url: str, lines: list[str]) -> Block:
-    """A lot: its name linking to its page, then a line per fact."""
+def lot(name: str, url: str, lines: list[str], changes: Sequence[Block] = ()) -> Block:
+    """A lot: its name linking to its page, then a line per fact, then what changed on a grey
+    ground, in black (each change's HTML is already escaped)."""
     facts = "".join(f'<div style="color:{MUTED};font-size:14px;line-height:20px">{esc(line)}'
                     "</div>" for line in lines)
-    return Block("\n".join([name, *lines, url]), (
+    if changes:
+        facts += (f'<div style="margin-top:8px;padding:8px 12px;background:{PAGE};'
+                  'border-radius:8px;font-size:14px;line-height:20px">'
+                  + "".join(f"<div>{line.html}</div>" for line in changes) + "</div>")
+    return Block("\n".join([name, *lines, *(line.text for line in changes), url]), (
         f'<div style="margin:0 0 12px;padding:16px;border:1px solid {BORDER};border-radius:12px">'
         f'<a href="{esc(url)}" style="color:{INK};font-weight:600;text-decoration:none">'
         f'{esc(name)}</a>{facts}</div>'))

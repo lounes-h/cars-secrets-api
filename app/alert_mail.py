@@ -2,6 +2,7 @@
 Built from the account emails' blocks (app/mail.py), so each is plain text and HTML. The words
 follow the web's (src/messages)."""
 
+from collections.abc import Sequence
 from datetime import date, datetime
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlencode
@@ -31,13 +32,16 @@ WORDS: dict[str, dict[str, Any]] = {
         "see_all": "See all {n}",
         "reminder_subject": "Auction reminder: {title}",
         "reminders_subject": "Auction reminders: {n} saved lots",
-        "change_subject": "A saved lot changed: {title}",
-        "changes_subject": "{n} saved lots changed",
+        "change_subject": "A saved lot changed: {title} · {what}",
+        "changes_subject": "{n} saved lots changed · {what}",
+        "changed": "Saved lot changed · {what}",
         "reminder": {"hour": "Auction reminder, 1 hour before",
                      "day": "Auction reminder, 1 day before"},
         "starts": "The auction starts {when}. That is when the auction opens, not when this lot "
                   "comes up.",
-        "changed": "Saved lot changed",
+        "what": {"sale": "auction date changed", "sale_set": "auction date set",
+                 "buy_now": "Buy now price changed"},
+        "and": " and ",
         "sale_change": "Auction: {old} → {new}",
         "sale_set": "Auction date set: {new}",
         "buy_now_change": "Buy now: {old} → {new}",
@@ -66,13 +70,16 @@ WORDS: dict[str, dict[str, Any]] = {
         "see_all": "Ver los {n}",
         "reminder_subject": "Recordatorio de subasta: {title}",
         "reminders_subject": "Recordatorios de subasta: {n} lotes guardados",
-        "change_subject": "Un lote guardado cambió: {title}",
-        "changes_subject": "{n} lotes guardados cambiaron",
+        "change_subject": "Un lote guardado cambió: {title} · {what}",
+        "changes_subject": "{n} lotes guardados cambiaron · {what}",
+        "changed": "Un lote guardado cambió · {what}",
         "reminder": {"hour": "Recordatorio de subasta, 1 hora antes",
                      "day": "Recordatorio de subasta, 1 día antes"},
         "starts": "La subasta empieza el {when}. Es la hora en que abre la subasta, no la hora "
                   "en que sale este lote.",
-        "changed": "Un lote guardado cambió",
+        "what": {"sale": "cambió la fecha de la subasta", "sale_set": "fecha de subasta fijada",
+                 "buy_now": "cambió el precio de compra inmediata"},
+        "and": " y ",
         "sale_change": "Subasta: {old} → {new}",
         "sale_set": "Fecha de subasta fijada: {new}",
         "buy_now_change": "Compra inmediata: {old} → {new}",
@@ -130,28 +137,53 @@ def plural(forms: tuple[str, str], n: int, **values: Any) -> str:
     return forms[n != 1].format(n=f"{n:,}", **values)
 
 
+def dated(time: dict[str, Any]) -> bool:
+    return bool(time["at"] or time["date"])
+
+
+def what(changes: list[dict[str, Any]], locale: str) -> str:
+    """What changed on these lots: "Auction date set and Buy now price changed". A future sale
+    given its date reads as set, not as changed."""
+    w, parts = WORDS[locale], []
+    if sales := [item["sale"] for item in changes if "sale" in item]:
+        moved = any(dated(one["from"]) for one in sales)
+        parts.append(w["what"]["sale" if moved else "sale_set"])
+    if any("buy_now" in item for item in changes):
+        parts.append(w["what"]["buy_now"])
+    words = w["and"].join(parts)
+    return words[:1].upper() + words[1:]
+
+
+def change(template: str, old: str, new: str) -> mail.Block:
+    """A change's line, its new value in bold in the HTML."""
+    return mail.Block(template.format(old=old, new=new), mail.esc(template).format(
+        old=mail.esc(old), new=f"<strong>{mail.esc(new)}</strong>"))
+
+
 def change_lines(lot: dict[str, Any], changes: dict[str, Any] | None, locale: str,
-                 tz: ZoneInfo) -> list[str]:
+                 tz: ZoneInfo) -> list[mail.Block]:
     w, lines = WORDS[locale], []
     if changes and (moved := changes.get("sale")):
         old = moved["from"]
         # A future sale given its date reads as set, not as "Future sale → …".
-        lines.append(w["sale_change" if old["at"] or old["date"] else "sale_set"].format(
-            old=sale(old["at"], old["date"], locale, tz),
-            new=sale(moved["to"]["at"], moved["to"]["date"], locale, tz)))
+        lines.append(change(w["sale_change" if dated(old) else "sale_set"],
+                            sale(old["at"], old["date"], locale, tz),
+                            sale(moved["to"]["at"], moved["to"]["date"], locale, tz)))
     if changes and (price := changes.get("buy_now")):
-        lines.append(w["buy_now_change"].format(old=offer(price["from"], lot["currency"], locale),
-                                                new=offer(price["to"], lot["currency"], locale)))
+        lines.append(change(w["buy_now_change"], offer(price["from"], lot["currency"], locale),
+                            offer(price["to"], lot["currency"], locale)))
     return lines
 
 
-def lot_block(lot: dict[str, Any], lines: list[str], locale: str, web_url: str) -> mail.Block:
-    """The lot's name, linking to it, then its number, auction and place, then `lines`."""
+def lot_block(lot: dict[str, Any], lines: list[str], locale: str, web_url: str,
+              changes: Sequence[mail.Block] = ()) -> mail.Block:
+    """The lot's name, linking to it, then its number, auction and place, then `lines`, then
+    what changed, set apart."""
     place = ", ".join(part for part in (lot["location_city"], lot["location_state"]) if part)
     where = [WORDS[locale]["lot"].format(number=lot["lot_number"]),
              AUCTIONS.get(lot["source"], lot["source"]), place]
     return mail.lot(title(lot, locale), lot_link(web_url, locale, lot),
-                    [" · ".join(part for part in where if part), *lines])
+                    [" · ".join(part for part in where if part), *lines], changes)
 
 
 def finish(subject: str, blocks: list[mail.Block], locale: str, web_url: str) -> mail.Mail:
@@ -191,23 +223,23 @@ def news_mail(reminders: list[dict[str, Any]], changes: list[dict[str, Any]], lo
               tz: ZoneInfo, web_url: str) -> mail.Mail:
     """Reminders due now, each with what changed on its lot, then the other saved lots that
     changed."""
-    w = WORDS[locale]
+    w, changed = WORDS[locale], what([item["changes"] for item in changes], locale)
     if len(reminders) == 1:
         subject = w["reminder_subject"].format(title=title(reminders[0]["lot"], locale))
     elif reminders:
         subject = w["reminders_subject"].format(n=len(reminders))
     elif len(changes) == 1:
-        subject = w["change_subject"].format(title=title(changes[0]["lot"], locale))
+        subject = w["change_subject"].format(what=changed, title=title(changes[0]["lot"], locale))
     else:
-        subject = w["changes_subject"].format(n=len(changes))
+        subject = w["changes_subject"].format(what=changed, n=len(changes))
     blocks = []
     for item in reminders:
         lot, which = item["lot"], "hour" if "hour" in item["reminders"] else "day"
         blocks.append(mail.section(w["reminder"][which], [
-            lot_block(lot, [w["starts"].format(when=when(lot["sale_at"], locale, tz)),
-                            *change_lines(lot, item["changes"], locale, tz)], locale, web_url)]))
+            lot_block(lot, [w["starts"].format(when=when(lot["sale_at"], locale, tz))], locale,
+                      web_url, change_lines(lot, item["changes"], locale, tz))]))
     for item in changes:
         lot = item["lot"]
-        blocks.append(mail.section(w["changed"], [
-            lot_block(lot, change_lines(lot, item["changes"], locale, tz), locale, web_url)]))
+        blocks.append(mail.section(w["changed"].format(what=what([item["changes"]], locale)), [
+            lot_block(lot, [], locale, web_url, change_lines(lot, item["changes"], locale, tz))]))
     return finish(subject, blocks, locale, web_url)
