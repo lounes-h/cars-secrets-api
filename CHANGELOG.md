@@ -1,3 +1,10 @@
+## [0.6.0](https://github.com/lounes-h/cars-secrets-api/compare/v0.5.0...v0.6.0) (2026-10-09)
+
+### Features
+
+* keep "A saved lot changed" in the change email's subject, before what changed ([170f3f4](https://github.com/lounes-h/cars-secrets-api/commit/170f3f46b3d6d126c3b5e24a82ff5709402b9c49))
+* name what changed in a saved lot change email and set the new value apart ([74efdd6](https://github.com/lounes-h/cars-secrets-api/commit/74efdd60d38514a30b5cc5234f6f90de8a536788))
+
 ## [0.5.0](https://github.com/lounes-h/cars-secrets-api/compare/v0.4.1...v0.5.0) (2026-10-09)
 
 ### Features

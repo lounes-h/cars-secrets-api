@@ -1,6 +1,6 @@
 [project]
 name = "cars-secrets-api"
-version = "0.5.0"
+version = "0.6.0"
 description = "Car's Secrets API: vehicle auction intelligence over its own lot database"
 requires-python = ">=3.12"
 dependencies = [
