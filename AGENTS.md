@@ -197,7 +197,8 @@ dealer's zone. Each lands in the dealer's inbox, and by email unless Settings tu
 A changes email's subject says what changed after the lot ("A saved lot changed: 2013 ACURA TSX ·
 Buy now price changed", "2 saved lots changed · Auction date set and Buy now price changed"), as
 the web's inbox heading does and each lot's section heading in it ("Saved lot changed · …"), and
-every change in an alert email sits on a grey ground with its new value in bold.
+every change in an alert email sits on a grey ground with its new value in bold. A reminder for an
+auction that moved gives its new start once, in that change, without "The auction starts …".
 
 Not done: terms of use and privacy policy documents, profile editing, email change, account
 deletion, MFA, deal analysis, alerts by text message, lot photos in alert emails, a one-click

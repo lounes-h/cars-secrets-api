@@ -358,8 +358,8 @@ def test_a_reminder_and_a_change_due_together_are_one_email(client, mailer, conn
 
     [(_, subject, body)] = mailer.sent[start:]
     assert subject == "Auction reminder: 2020 TOYOTA CAMRY"
-    assert "The auction starts Thu, Oct 8, 12:30 PM UTC." in body
     assert "Auction: Fri, Oct 9, 3:00 PM UTC → Thu, Oct 8, 12:30 PM UTC" in body
+    assert body.count("Thu, Oct 8, 12:30 PM UTC") == 1 and "The auction starts" not in body
     [entry] = inbox(conn)
     assert entry["kind"] == "reminder" and set(entry["payload"]["changes"]) == {"sale"}
 

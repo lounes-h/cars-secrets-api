@@ -235,9 +235,12 @@ def news_mail(reminders: list[dict[str, Any]], changes: list[dict[str, Any]], lo
     blocks = []
     for item in reminders:
         lot, which = item["lot"], "hour" if "hour" in item["reminders"] else "day"
+        # A moved auction's change line gives its new start, in place of "The auction starts …".
+        moved = item["changes"] and "sale" in item["changes"]
+        starts = [] if moved else [w["starts"].format(when=when(lot["sale_at"], locale, tz))]
         blocks.append(mail.section(w["reminder"][which], [
-            lot_block(lot, [w["starts"].format(when=when(lot["sale_at"], locale, tz))], locale,
-                      web_url, change_lines(lot, item["changes"], locale, tz))]))
+            lot_block(lot, starts, locale, web_url, change_lines(lot, item["changes"], locale,
+                                                                 tz))]))
     for item in changes:
         lot = item["lot"]
         blocks.append(mail.section(w["changed"].format(what=what([item["changes"]], locale)), [
