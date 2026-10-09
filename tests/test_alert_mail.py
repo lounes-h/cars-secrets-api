@@ -78,12 +78,14 @@ def test_what_changed_heads_the_email_and_its_new_value_stands_out():
     asunto, cuerpo, _ = alert_mail.news_mail([], [cheaper, both], "es", MEXICO,
                                              "https://web.test")
 
-    assert subject == "Buy now price changed: 2021 HONDA CIVIC EX"
-    assert "Buy now price changed\n  2021 HONDA CIVIC EX" in body, "and heads the lot's section"
+    assert subject == "A saved lot changed: 2021 HONDA CIVIC EX · Buy now price changed"
+    assert "Saved lot changed · Buy now price changed\n  2021 HONDA CIVIC EX" in body, (
+        "and heads the lot's section")
     assert "<div>Buy now: $9,500 → <strong>$8,900</strong></div>" in page
-    assert asunto == ("Fecha de subasta fijada y cambió el precio de compra inmediata en 2 lotes "
-                      "guardados")
-    assert "Fecha de subasta fijada y cambió el precio de compra inmediata\n" in cuerpo
+    assert asunto == ("2 lotes guardados cambiaron · Fecha de subasta fijada y cambió el precio de "
+                      "compra inmediata")
+    assert "Un lote guardado cambió · Fecha de subasta fijada y cambió el precio de compra " \
+        "inmediata\n" in cuerpo
 
 
 def test_a_date_set_on_one_lot_and_moved_on_another_reads_as_changed():

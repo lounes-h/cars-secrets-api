@@ -32,8 +32,9 @@ WORDS: dict[str, dict[str, Any]] = {
         "see_all": "See all {n}",
         "reminder_subject": "Auction reminder: {title}",
         "reminders_subject": "Auction reminders: {n} saved lots",
-        "change_subject": "{what}: {title}",
-        "changes_subject": "{what} on {n} saved lots",
+        "change_subject": "A saved lot changed: {title} · {what}",
+        "changes_subject": "{n} saved lots changed · {what}",
+        "changed": "Saved lot changed · {what}",
         "reminder": {"hour": "Auction reminder, 1 hour before",
                      "day": "Auction reminder, 1 day before"},
         "starts": "The auction starts {when}. That is when the auction opens, not when this lot "
@@ -69,8 +70,9 @@ WORDS: dict[str, dict[str, Any]] = {
         "see_all": "Ver los {n}",
         "reminder_subject": "Recordatorio de subasta: {title}",
         "reminders_subject": "Recordatorios de subasta: {n} lotes guardados",
-        "change_subject": "{what}: {title}",
-        "changes_subject": "{what} en {n} lotes guardados",
+        "change_subject": "Un lote guardado cambió: {title} · {what}",
+        "changes_subject": "{n} lotes guardados cambiaron · {what}",
+        "changed": "Un lote guardado cambió · {what}",
         "reminder": {"hour": "Recordatorio de subasta, 1 hora antes",
                      "day": "Recordatorio de subasta, 1 día antes"},
         "starts": "La subasta empieza el {when}. Es la hora en que abre la subasta, no la hora "
@@ -238,6 +240,6 @@ def news_mail(reminders: list[dict[str, Any]], changes: list[dict[str, Any]], lo
                       web_url, change_lines(lot, item["changes"], locale, tz))]))
     for item in changes:
         lot = item["lot"]
-        blocks.append(mail.section(what([item["changes"]], locale), [
+        blocks.append(mail.section(w["changed"].format(what=what([item["changes"]], locale)), [
             lot_block(lot, [], locale, web_url, change_lines(lot, item["changes"], locale, tz))]))
     return finish(subject, blocks, locale, web_url)
