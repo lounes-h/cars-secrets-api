@@ -52,6 +52,21 @@ def test_several_reminders_and_a_buy_now_taken_away():
     assert ">2021 HONDA CIVIC EX</a>" in page and ">Your alerts</a>" in page
 
 
+
+def test_a_future_sale_given_its_date_reads_as_set():
+    unset = {"at": None, "date": None}
+    timed = {"lot": LOT, "changes": {"sale": {"from": unset, "to": {"at": LOT["sale_at"],
+                                                                    "date": None}}}}
+    dated = {"lot": LOT, "changes": {"sale": {"from": unset, "to": {"at": None,
+                                                                    "date": "2026-10-09"}}}}
+
+    _, body, _ = alert_mail.news_mail([], [timed, dated], "en", NEW_YORK, "https://web.test")
+    _, cuerpo, _ = alert_mail.news_mail([], [dated], "es", NEW_YORK, "https://web.test")
+
+    assert "Auction date set: Thu, Oct 8, 11:00 AM EDT" in body
+    assert "Auction date set: Oct 9, 2026" in body and "Future sale" not in body
+    assert "Fecha de subasta fijada: 9 oct 2026" in cuerpo
+
 def test_a_summary_in_spanish():
     found = LOT | {"high_bid": 1500.0, "buy_it_now_price": 4000.0, "searches": ["Hondas"]}
     unbid = LOT | {"lot_number": "8", "searches": ["Hondas"]}  # no bid yet, no Buy now

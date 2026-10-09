@@ -214,6 +214,36 @@ def test_an_unconfirmed_address_gets_no_email(client, mailer, conn):
     assert mailer.sent[start:] == [] and len(inbox(conn)) == 1
 
 
+
+def test_a_future_sale_given_its_date_tells_a_dealer_waiting_with_reminders(client, mailer, conn):
+    reminded(client, mailer, conn, sale_at=None)
+    start = len(mailer.sent)
+    conn.execute("UPDATE lots SET sale_at = '2026-10-12T15:00Z', buy_it_now_price = 8000")
+
+    run(client, "2026-10-08T12:00Z")
+    run(client, "2026-10-08T12:01Z")
+
+    [(_, subject, body)] = mailer.sent[start:]
+    assert subject == "A saved lot changed: 2020 TOYOTA CAMRY"
+    assert "Auction date set: Mon, Oct 12, 3:00 PM UTC" in body
+    assert "Buy now" not in body, "Buy now changes are for change alerts"
+    [entry] = inbox(conn)
+    [lot] = entry["payload"]["lots"]
+    assert entry["kind"] == "changes" and set(lot["changes"]) == {"sale"}
+
+
+def test_a_date_set_before_reminders_were_is_no_news(client, mailer, conn):
+    headers = dealer(client, mailer)
+    insert_lot(conn, "1", sale_at=None)
+    save(client, headers)  # bookmarked while a future sale
+    conn.execute("UPDATE lots SET sale_at = '2026-10-12T15:00Z'")
+    save(client, headers, remind_hour=True)  # the date is on the page by now
+    start = len(mailer.sent)
+
+    run(client, "2026-10-08T12:00Z")
+
+    assert mailer.sent[start:] == [] and inbox(conn) == []
+
 # --- saved lot changes ------------------------------------------------------------------------
 
 def watched(client, mailer, conn, **lot) -> dict:
