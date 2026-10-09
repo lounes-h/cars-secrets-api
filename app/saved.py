@@ -2,7 +2,7 @@
 a search's alerts are each switched on separately, and app/alerts.py sends them."""
 
 from datetime import datetime
-from typing import Annotated, Any, Literal, get_origin
+from typing import Annotated, Any, get_origin
 from urllib.parse import parse_qs
 from uuid import UUID
 
@@ -11,30 +11,15 @@ from fastapi import APIRouter
 from psycopg.types.json import Jsonb
 from pydantic import AfterValidator, BaseModel, Field, StringConstraints, ValidationError
 
+from .accounts import Context, seed_settings
 from .auth import RwConn, User, error
-from .lots import COLUMNS, Lot, LotFilters, to_lot, zone
+from .lots import COLUMNS, Lot, LotFilters, to_lot
 
 router = APIRouter(prefix="/me", tags=["saved"])
 
 # Per account, until plans set their own.
 MAX_SAVED_LOTS = 500
 MAX_SAVED_SEARCHES = 50
-
-
-class Context(BaseModel):
-    """The dealer's language and zone where the request came from. They seed the alert settings
-    the first time; from then on the dealer changes them in Settings."""
-
-    locale: Literal["en", "es"] = "en"
-    time_zone: str = Field("UTC", max_length=64)
-
-
-def seed_settings(conn: psycopg.Connection, user_id: Any, context: Context) -> None:
-    conn.execute(
-        """INSERT INTO app.alert_settings (user_id, locale, time_zone) VALUES (%s, %s, %s)
-           ON CONFLICT (user_id) DO NOTHING""",
-        (user_id, context.locale, zone(context.time_zone).key),
-    )
 
 
 # --- saved lots -------------------------------------------------------------------------------

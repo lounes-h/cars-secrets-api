@@ -144,6 +144,8 @@ def test_saved_lots_and_searches_are_capped(client, mailer, conn, monkeypatch):
 def test_the_first_alert_write_takes_the_dealers_language_and_zone(client, mailer, conn):
     headers = dealer(client, mailer)
     insert_lot(conn, "1")
+    # Registration sets them; an account without them is a Google or Apple sign-up.
+    conn.execute("DELETE FROM app.alert_settings")
 
     save(client, headers, locale="es", time_zone="America/Chicago")
     search(client, headers, locale="en", time_zone="Mars/Olympus")  # not the first: ignored
@@ -154,6 +156,7 @@ def test_the_first_alert_write_takes_the_dealers_language_and_zone(client, maile
 
 def test_an_unknown_zone_is_utc(client, mailer, conn):
     headers = dealer(client, mailer)
+    conn.execute("DELETE FROM app.alert_settings")
 
     search(client, headers, time_zone="Mars/Olympus")
 

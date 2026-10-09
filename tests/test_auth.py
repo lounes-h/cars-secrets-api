@@ -8,11 +8,12 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from app import oauth
+from app import alerts, oauth
 
 RSA_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 GOOD = {"first_name": "Dana", "last_name": "Lee", "email": "Dana@Example.com",
-        "phone": "+14155552671", "password": "long-enough-pw", "accept_terms": True}
+        "phone": "+14155552671", "password": "long-enough-pw", "accept_terms": True,
+        "locale": "en", "time_zone": "UTC"}
 INTERNAL = {"X-Internal-Key": "k" * 32, "X-Client-IP": "9.9.9.9"}
 
 
@@ -235,6 +236,9 @@ def test_forgot_and_reset_password(client, mailer):
     assert login(client, password="brand-new-password").status_code == 200
     assert client.get("/api/auth/me",
                       headers={"Authorization": f"Bearer {old_session}"}).status_code == 401
+    to, subject, body = mailer.sent[-1]
+    assert (to, subject) == ("dana@example.com", "Your password was changed")
+    assert "https://web.test/forgot-password" in body
 
 
 # --- social login -----------------------------------------------------------------------------
@@ -326,6 +330,77 @@ def test_apple_first_sign_in_takes_the_posted_name(client, settings, monkeypatch
     row = conn.execute("SELECT first_name, last_name, email_verified_at FROM app.users").fetchone()
     assert (row["first_name"], row["last_name"]) == ("Dana", "Lee")
     assert row["email_verified_at"] is not None
+
+
+# --- the language of every email --------------------------------------------------------------
+
+def test_registering_keeps_the_pages_language_and_the_browsers_zone(client, mailer, conn):
+    register(client, locale="es", time_zone="America/Chicago")
+
+    assert conn.execute("SELECT locale, time_zone FROM app.alert_settings").fetchone() == {
+        "locale": "es", "time_zone": "America/Chicago"}
+    to, subject, body = mailer.sent[-1]
+    assert subject == "Tu código de confirmación" and "Ingresa este código" in body
+    assert '<html lang="es">' in mailer.html[-1]
+
+
+def test_registering_requires_the_language_and_zone_and_mends_an_unknown_zone(client, conn):
+    assert register(client, locale=None).status_code == 422
+    assert register(client, locale="fr").status_code == 422
+    assert register(client, time_zone=None).status_code == 422
+    assert register(client, time_zone="Mars/Olympus").status_code == 200
+    assert conn.execute("SELECT time_zone FROM app.alert_settings").fetchone() == {
+        "time_zone": "UTC"}
+
+
+def test_every_account_email_follows_the_language_settings_hold(client, mailer, conn):
+    register(client, locale="es")
+    verify(client, mailer.last_code())
+
+    register(client, locale="en")  # someone else, on the English page: the owner reads Spanish
+    assert mailer.sent[-1][1] == "Ya tienes una cuenta"
+    assert "https://web.test/es/login" in mailer.sent[-1][2]
+
+    conn.execute("UPDATE app.alert_settings SET locale = 'en'")  # Settings changed it
+    client.post("/api/auth/forgot-password", json={"email": "dana@example.com"})
+    assert mailer.sent[-1][1] == "Reset your password"
+    assert "https://web.test/reset-password?token=" in mailer.sent[-1][2]
+
+    conn.execute("UPDATE app.alert_settings SET locale = 'es'")
+    client.post("/api/auth/reset-password",
+                json={"token": mailer.last_link("/reset-password"), "password": "brand-new-pw!"})
+    assert mailer.sent[-1][1] == "Tu contraseña cambió"
+    assert "https://web.test/es/forgot-password" in mailer.sent[-1][2]
+
+
+def test_an_account_without_a_language_is_mailed_in_english(client, mailer, conn):
+    register(client, locale="es")
+    conn.execute("DELETE FROM app.alert_settings")  # as a Google or Apple sign-up has none
+    client.post("/api/auth/forgot-password", json={"email": "dana@example.com"})
+    assert mailer.sent[-1][1] == "Reset your password"
+
+
+# --- when sending fails -------------------------------------------------------------------------
+
+def test_a_code_that_could_not_be_sent_goes_out_at_the_next_run(client, mailer, conn):
+    mailer.failures = 1
+    assert register(client).json() == {"ok": True}, "the answer never changes"
+    assert mailer.sent == []
+
+    alerts.tick(client.app.state, now=datetime.now(UTC) + timedelta(minutes=1))
+
+    assert verify(client, mailer.last_code()).status_code == 200
+
+
+def test_a_new_code_takes_the_place_of_one_still_unsent(client, mailer, conn):
+    mailer.failures = 1
+    register(client)
+    conn.execute("UPDATE app.email_codes SET created_at = now() - interval '2 minutes'")
+    client.post("/api/auth/resend-verification", json={"email": "dana@example.com"})
+    alerts.tick(client.app.state, now=datetime.now(UTC) + timedelta(minutes=1))
+
+    assert len(mailer.sent) == 1, "the first code is void, so it is never sent"
+    assert verify(client, mailer.last_code()).status_code == 200
 
 
 # --- email confirmation codes -----------------------------------------------------------------

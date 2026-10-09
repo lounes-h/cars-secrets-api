@@ -9,6 +9,8 @@ process (`loop`, started by app/main.py).
   17:00, in the dealer's zone. Updates to older lots never do.
 
 Everything lands in the inbox, one entry per email section; email follows the dealer's settings.
+An entry and its email are stored together (app/outbox.py), which sends the email after the run
+and tries again when that fails.
 """
 
 import logging
@@ -22,7 +24,7 @@ from fastapi import APIRouter, Query
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from . import alert_mail
+from . import alert_mail, outbox
 from .auth import RwConn, User
 from .lots import COLUMNS, LOTS, SORTS, Lot, lot_filters, to_lot, zone
 from .saved import parse_filters
@@ -191,9 +193,8 @@ def loop(state: Any, stop: threading.Event) -> None:
 
 
 def tick(state: Any, now: datetime | None = None) -> None:
-    """One run: reminders and changes, then the summaries that are due. One process at a time.
-    Each dealer's alerts are stored before their email goes out: a failed send is logged and the
-    inbox keeps the alert. ponytail: no retry; add an outbox if sends fail in earnest."""
+    """One run: reminders and changes, then the summaries that are due, one process at a time;
+    then every email that is due, from this run or an earlier failure, in any process."""
     now = now or datetime.now(UTC)
     with state.rw_pool.connection() as conn:
         if not conn.execute("SELECT pg_try_advisory_lock(hashtext('api:alerts')) AS ok"
@@ -202,11 +203,12 @@ def tick(state: Any, now: datetime | None = None) -> None:
         try:
             conn.execute(CANCEL_REMINDERS)
             for rows in lot_news(conn, now):
-                guarded(send_lot_news, conn, state, rows)
+                guarded(send_lot_news, conn, state, rows, now)
             for dealer in due_summaries(conn, now):
                 guarded(send_summary, conn, state, dealer, now)
         finally:
             conn.execute("SELECT pg_advisory_unlock(hashtext('api:alerts'))")
+    outbox.flush(state, now=now)
 
 
 def guarded(work: Any, *args: Any) -> None:
@@ -264,18 +266,24 @@ def lot_news(conn: psycopg.Connection, now: datetime) -> list[list[dict[str, Any
     return [list(rows) for _, rows in groupby(rows, key=lambda row: row["user_id"])]
 
 
-def send_lot_news(conn: psycopg.Connection, state: Any, rows: list[dict[str, Any]]) -> None:
+def send_lot_news(conn: psycopg.Connection, state: Any, rows: list[dict[str, Any]],
+                  now: datetime) -> None:
     """One dealer's reminders and changes: an inbox entry per reminded lot (its changes folded
-    in) and one for the other changed lots, then one email."""
+    in) and one for the other changed lots, and one email."""
     dealer = rows[0]
-    reminders, changes = [], []
+    reminders, changes, starts = [], [], []
     for row in rows:
         lot = summary(to_lot(row))
         diff = differences(row) if row["change_alerts"] else None
         if which := [name for name in ("day", "hour") if row[f"{name}_due"]]:
             reminders.append({"lot": lot, "reminders": which, "changes": diff})
+            starts.append(row["sale_at"])
         elif diff:
             changes.append({"lot": lot, "changes": diff})
+    emailed = reminders if dealer["email_reminders"] else []
+    told = changes + [{"lot": item["lot"], "changes": item["changes"]}
+                      for item in reminders if item["changes"] and not emailed]
+    told = told if dealer["email_changes"] else []
     with conn.transaction():
         for item in reminders:
             add(conn, dealer["user_id"], "reminder", item)
@@ -296,13 +304,11 @@ def send_lot_news(conn: psycopg.Connection, state: Any, rows: list[dict[str, Any
                  "sale_at": row["sale_at"], "sale_date": row["sale_date"],
                  "buy_now": row["buy_it_now_price"], "user": row["user_id"],
                  "source": row["source"], "lot": row["lot_number"]})
-    emailed = reminders if dealer["email_reminders"] else []
-    told = changes + [{"lot": item["lot"], "changes": item["changes"]}
-                      for item in reminders if item["changes"] and not emailed]
-    told = told if dealer["email_changes"] else []
-    if dealer["verified"] and (emailed or told):
-        state.mailer.send(dealer["email"], *alert_mail.news_mail(
-            emailed, told, dealer["locale"], zone(dealer["time_zone"]), state.settings.web_url))
+        if dealer["verified"] and (emailed or told):
+            # A reminder is worth nothing once its auction has started.
+            outbox.queue(conn, state.mail_key, "news", dealer["email"], alert_mail.news_mail(
+                emailed, told, dealer["locale"], zone(dealer["time_zone"]), state.settings.web_url),
+                now=now, expires_at=min(starts) if emailed else now + DAY)
 
 
 def last_slot(now: datetime, tz: Any, twice_daily: bool) -> datetime:
@@ -365,9 +371,10 @@ def send_summary(conn: psycopg.Connection, state: Any, dealer: dict[str, Any],
         conn.execute("""INSERT INTO app.alert_settings (user_id, summary_at) VALUES (%s, %s)
                         ON CONFLICT (user_id) DO UPDATE SET summary_at = EXCLUDED.summary_at""",
                      (dealer["user_id"], dealer["slot"]))
-    if payload and dealer["email_matches"] and dealer["verified"]:
-        state.mailer.send(dealer["email"], *alert_mail.summary_mail(
-            payload, dealer["locale"], zone(dealer["time_zone"]), state.settings.web_url))
+        if payload and dealer["email_matches"] and dealer["verified"]:
+            outbox.queue(conn, state.mail_key, "summary", dealer["email"], alert_mail.summary_mail(
+                payload, dealer["locale"], zone(dealer["time_zone"]), state.settings.web_url),
+                now=now, expires_at=now + DAY)
 
 
 def matches(conn: psycopg.Connection, found: list[tuple[dict[str, Any], list[tuple[str, str]]]]

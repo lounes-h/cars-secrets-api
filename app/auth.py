@@ -3,14 +3,15 @@
 import hmac
 import json
 from collections.abc import Iterator
-from typing import Annotated, Any
+from datetime import UTC, datetime, timedelta
+from typing import Annotated, Any, Literal
 
 import phonenumbers
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr, Field
 
-from . import accounts, mail, oauth, security
+from . import accounts, mail, oauth, outbox, security
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -81,6 +82,20 @@ def mail_allowed(request: Request, conn: psycopg.Connection, kind: str, email: s
     return True
 
 
+def send_mail(request: Request, conn: psycopg.Connection, kind: str, to: str, message: mail.Mail,
+              seconds: int, *, replace: bool = False) -> None:
+    """Queues an email that is worth sending for `seconds`, and sends it now. When that fails,
+    the alert job tries again (app/outbox.py); the caller's answer stays the same."""
+    state, now = request.app.state, datetime.now(UTC)
+    sent = outbox.queue(conn, state.mail_key, kind, to, message, now=now,
+                        expires_at=now + timedelta(seconds=seconds), replace=replace)
+    outbox.flush(state, ids=[sent], now=now)
+
+
+# A notice stays worth sending for a day.
+NOTICE_SECONDS = 24 * 3600
+
+
 def check_password(request: Request, password: str) -> None:
     if not security.MIN_PASSWORD <= len(password) <= security.MAX_PASSWORD:
         raise field_error("password", f"Use {security.MIN_PASSWORD} to {security.MAX_PASSWORD} "
@@ -129,7 +144,7 @@ Email = Annotated[EmailStr, Field(max_length=254)]
 
 # --- registration and verification ------------------------------------------------------------
 
-class RegisterIn(BaseModel):
+class RegisterIn(accounts.Context):
     first_name: Name
     last_name: Name
     email: Email
@@ -137,6 +152,9 @@ class RegisterIn(BaseModel):
     password: str
     accept_terms: bool
     captcha_token: str | None = None
+    # The page's language and the browser's zone: every email's from now on, until Settings.
+    locale: Literal["en", "es"]
+    time_zone: str = Field(max_length=64)
 
 
 @router.post("/register")
@@ -147,15 +165,17 @@ def register(body: RegisterIn, request: Request, conn: RwConn) -> dict[str, bool
         raise field_error("accept_terms", "You must accept the Terms of Use and Privacy Policy.")
     phone = normalize_phone(body.phone)
     check_password(request, body.password)
-    s, mailer = request.app.state.settings, request.app.state.mailer
+    s = request.app.state.settings
     email = accounts.normalize_email(body.email)
-    if accounts.user_by_email(conn, email):
+    if owner := accounts.user_by_email(conn, email):
         if mail_allowed(request, conn, "existing", email):
-            mailer.send(email, *mail.existing_account_mail(s.web_url))
+            send_mail(request, conn, "existing", email, mail.existing_account_mail(
+                accounts.email_locale(conn, owner["id"]), s.web_url), NOTICE_SECONDS)
         return {"ok": True}
     user = accounts.create_user(
         conn, email=email, first_name=body.first_name.strip(), last_name=body.last_name.strip(),
         phone=phone, password_hash=security.hash_password(body.password), terms_accepted=True)
+    accounts.seed_settings(conn, user["id"], body)
     send_code(request, conn, user)
     return {"ok": True}
 
@@ -171,8 +191,9 @@ def send_code(request: Request, conn: psycopg.Connection, user: dict[str, Any]) 
     accounts.save_email_code(conn, user["id"],
                              security.code_hash(request.app.state.code_key, user["id"], code),
                              s.verify_code_seconds)
-    request.app.state.mailer.send(user["email"],
-                                  *mail.verification_mail(code, s.verify_code_seconds // 60))
+    send_mail(request, conn, "verify", user["email"], mail.verification_mail(
+        code, s.verify_code_seconds // 60, accounts.email_locale(conn, user["id"]), s.web_url),
+        s.verify_code_seconds, replace=True)
 
 
 # Six ASCII digits; `\d` would also accept other scripts' digits.
@@ -281,11 +302,13 @@ def me(user: User) -> dict[str, Any]:
 @router.post("/forgot-password")
 def forgot_password(body: EmailIn, request: Request, conn: RwConn) -> dict[str, bool]:
     require_captcha(request, body.captcha_token)
-    s, mailer = request.app.state.settings, request.app.state.mailer
+    s = request.app.state.settings
     user = accounts.user_by_email(conn, body.email)
     if user and mail_allowed(request, conn, "reset", user["email"]):
         token = accounts.create_token(conn, user["id"], "reset_password", s.reset_token_seconds)
-        mailer.send(user["email"], *mail.reset_mail(s.web_url, token))
+        send_mail(request, conn, "reset", user["email"], mail.reset_mail(
+            token, s.reset_token_seconds // 60, accounts.email_locale(conn, user["id"]),
+            s.web_url), s.reset_token_seconds)
     return {"ok": True}
 
 
@@ -303,6 +326,10 @@ def reset_password(body: ResetIn, request: Request, conn: RwConn) -> dict[str, b
     accounts.set_password(conn, user_id, security.hash_password(body.password))
     accounts.mark_verified(conn, user_id)   # the link proved ownership of the address
     accounts.revoke_all_sessions(conn, user_id)
+    user = accounts.user_by_id(conn, user_id)
+    send_mail(request, conn, "password_changed", user["email"], mail.password_changed_mail(
+        accounts.email_locale(conn, user_id), request.app.state.settings.web_url),
+        NOTICE_SECONDS)
     return {"ok": True}
 
 

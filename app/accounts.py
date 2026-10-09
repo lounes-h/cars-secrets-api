@@ -1,11 +1,13 @@
 """Storage for accounts in the `app` schema. Every function takes a writable connection."""
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 import psycopg
+from pydantic import BaseModel, Field
 
+from .lots import zone
 from .security import new_token, token_hash
 
 USER_COLUMNS = """id, email, first_name, last_name, phone, password_hash, email_verified_at,
@@ -39,6 +41,30 @@ def user_by_email(conn: psycopg.Connection, email: str) -> dict[str, Any] | None
 def user_by_id(conn: psycopg.Connection, user_id: UUID) -> dict[str, Any] | None:
     return conn.execute(f"SELECT {USER_COLUMNS} FROM app.users WHERE id = %s",
                         (user_id,)).fetchone()
+
+
+class Context(BaseModel):
+    """The dealer's language and zone where the request came from. They seed the dealer's
+    settings the first time (registration, or the first save of an older account); from then on
+    the dealer changes them in Settings."""
+
+    locale: Literal["en", "es"] = "en"
+    time_zone: str = Field("UTC", max_length=64)
+
+
+def seed_settings(conn: psycopg.Connection, user_id: Any, context: Context) -> None:
+    conn.execute(
+        """INSERT INTO app.alert_settings (user_id, locale, time_zone) VALUES (%s, %s, %s)
+           ON CONFLICT (user_id) DO NOTHING""",
+        (user_id, context.locale, zone(context.time_zone).key),
+    )
+
+
+def email_locale(conn: psycopg.Connection, user_id: UUID) -> str:
+    """The language every email to the dealer is in: the one Settings holds, else English."""
+    row = conn.execute("SELECT locale FROM app.alert_settings WHERE user_id = %s",
+                       (user_id,)).fetchone()
+    return row["locale"] if row else "en"
 
 
 def set_password(conn: psycopg.Connection, user_id: UUID, password_hash: str) -> None:

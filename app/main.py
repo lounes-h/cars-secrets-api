@@ -12,7 +12,7 @@ import httpx
 import psycopg
 from fastapi import APIRouter, Depends, FastAPI
 
-from . import alerts, auth, lots, preferences, saved
+from . import alerts, auth, lots, outbox, preferences, saved
 from .config import Settings, get_settings
 from .db import make_pool
 from .mail import Mailer, make_mailer
@@ -49,6 +49,7 @@ def create_app(settings: Settings | None = None, *, mailer: Mailer | None = None
     app.state.settings, app.state.pool, app.state.rw_pool = settings, pool, rw_pool
     app.state.mailer, app.state.http = mailer or make_mailer(settings), http
     app.state.code_key = settings.email_code_secret.encode() or dev_code_key()
+    app.state.mail_key = outbox.derive_key(app.state.code_key)
 
     def db() -> Iterator[psycopg.Connection]:
         with pool.connection() as conn:

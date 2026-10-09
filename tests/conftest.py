@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import re
+import smtplib
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -48,11 +49,20 @@ def conn(db_url: str) -> Iterator[psycopg.Connection]:
 
 
 class FakeMailer:
+    """Keeps (to, subject, plain text) in `sent` and each HTML in `html`; `failures` makes the
+    next sends raise, as an SMTP server that is down would."""
+
     def __init__(self) -> None:
         self.sent: list[tuple[str, str, str]] = []
+        self.html: list[str] = []
+        self.failures = 0
 
-    def send(self, to: str, subject: str, body: str) -> None:
-        self.sent.append((to, subject, body))
+    def send(self, to: str, subject: str, text: str, html: str) -> None:
+        if self.failures:
+            self.failures -= 1
+            raise smtplib.SMTPServerDisconnected("Connection unexpectedly closed")
+        self.sent.append((to, subject, text))
+        self.html.append(html)
 
     def last_link(self, path: str) -> str:
         """The token in the last mail's link for `path`, e.g. '/verify-email'."""

@@ -1,10 +1,13 @@
 """The alert emails, in the dealer's language, with every time in the dealer's own zone and named.
-Plain text, like the account emails (app/mail.py). The words follow the web's (src/messages)."""
+Built from the account emails' blocks (app/mail.py), so each is plain text and HTML. The words
+follow the web's (src/messages)."""
 
 from datetime import date, datetime
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlencode
 from zoneinfo import ZoneInfo
+
+from . import mail
 
 WORDS: dict[str, dict[str, Any]] = {
     "en": {
@@ -25,7 +28,7 @@ WORDS: dict[str, dict[str, Any]] = {
         "matches_intro": "Lots listed since your last summary that match your saved searches:",
         "search": ("{name}: 1 new lot", "{name}: {n} new lots"),
         "also": "Also matches: {names}",
-        "see_all": "See all {n}: {url}",
+        "see_all": "See all {n}",
         "reminder_subject": "Auction reminder: {title}",
         "reminders_subject": "Auction reminders: {n} saved lots",
         "change_subject": "A saved lot changed: {title}",
@@ -37,7 +40,8 @@ WORDS: dict[str, dict[str, Any]] = {
         "changed": "Saved lot changed",
         "sale_change": "Auction: {old} → {new}",
         "buy_now_change": "Buy now: {old} → {new}",
-        "footer": "Your alerts: {alerts}\nChoose what we email you: {settings}",
+        "alerts": "Your alerts",
+        "settings": "Choose what we email you",
     },
     "es": {
         "days": ("lun", "mar", "mié", "jue", "vie", "sáb", "dom"),
@@ -58,7 +62,7 @@ WORDS: dict[str, dict[str, Any]] = {
                          "búsquedas guardadas:",
         "search": ("{name}: 1 lote nuevo", "{name}: {n} lotes nuevos"),
         "also": "También coincide con: {names}",
-        "see_all": "Ver los {n}: {url}",
+        "see_all": "Ver los {n}",
         "reminder_subject": "Recordatorio de subasta: {title}",
         "reminders_subject": "Recordatorios de subasta: {n} lotes guardados",
         "change_subject": "Un lote guardado cambió: {title}",
@@ -70,7 +74,8 @@ WORDS: dict[str, dict[str, Any]] = {
         "changed": "Un lote guardado cambió",
         "sale_change": "Subasta: {old} → {new}",
         "buy_now_change": "Compra inmediata: {old} → {new}",
-        "footer": "Tus alertas: {alerts}\nElige qué te enviamos por correo: {settings}",
+        "alerts": "Tus alertas",
+        "settings": "Elige qué te enviamos por correo",
     },
 }
 AUCTIONS = {"copart": "Copart"}
@@ -114,25 +119,13 @@ def title(lot: dict[str, Any], locale: str) -> str:
     return named or WORDS[locale]["lot"].format(number=lot["lot_number"])
 
 
-def link(web_url: str, locale: str, path: str) -> str:
-    """A page of the web app, in the dealer's language (Spanish pages are under /es)."""
-    return f"{web_url}{'' if locale == 'en' else '/' + locale}{path}"
-
-
 def lot_link(web_url: str, locale: str, lot: dict[str, Any]) -> str:
-    return link(web_url, locale, f"/active-lots/{quote(lot['source'])}/{quote(lot['lot_number'])}")
+    return mail.page(web_url, locale,
+                     f"/active-lots/{quote(lot['source'])}/{quote(lot['lot_number'])}")
 
 
 def plural(forms: tuple[str, str], n: int, **values: Any) -> str:
     return forms[n != 1].format(n=f"{n:,}", **values)
-
-
-def heading(lot: dict[str, Any], locale: str) -> list[str]:
-    """The lot's name, then its number, auction and place."""
-    place = ", ".join(part for part in (lot["location_city"], lot["location_state"]) if part)
-    where = [WORDS[locale]["lot"].format(number=lot["lot_number"]),
-             AUCTIONS.get(lot["source"], lot["source"]), place]
-    return [title(lot, locale), " · ".join(part for part in where if part)]
 
 
 def change_lines(lot: dict[str, Any], changes: dict[str, Any] | None, locale: str,
@@ -148,22 +141,30 @@ def change_lines(lot: dict[str, Any], changes: dict[str, Any] | None, locale: st
     return lines
 
 
-def footer(web_url: str, locale: str) -> str:
-    return WORDS[locale]["footer"].format(alerts=link(web_url, locale, "/alerts"),
-                                          settings=link(web_url, locale, "/settings"))
+def lot_block(lot: dict[str, Any], lines: list[str], locale: str, web_url: str) -> mail.Block:
+    """The lot's name, linking to it, then its number, auction and place, then `lines`."""
+    place = ", ".join(part for part in (lot["location_city"], lot["location_state"]) if part)
+    where = [WORDS[locale]["lot"].format(number=lot["lot_number"]),
+             AUCTIONS.get(lot["source"], lot["source"]), place]
+    return mail.lot(title(lot, locale), lot_link(web_url, locale, lot),
+                    [" · ".join(part for part in where if part), *lines])
 
 
-def indent(lines: list[str]) -> list[str]:
-    return ["  " + line for line in lines]
+def finish(subject: str, blocks: list[mail.Block], locale: str, web_url: str) -> mail.Mail:
+    """The email, with the way to the inbox and to what is emailed under it."""
+    w = WORDS[locale]
+    links = [(w["alerts"], mail.page(web_url, locale, "/alerts")),
+             (w["settings"], mail.page(web_url, locale, "/settings"))]
+    return mail.compose(subject, [*blocks, mail.footer(links)], locale, web_url)
 
 
 def summary_mail(payload: dict[str, Any], locale: str, tz: ZoneInfo,
-                 web_url: str) -> tuple[str, str]:
+                 web_url: str) -> mail.Mail:
     """New lots by saved search; a lot matching several is listed once, naming the others."""
     w = WORDS[locale]
-    parts = [w["matches_intro"]]
+    blocks = [mail.paragraph(w["matches_intro"])]
     for group in payload["searches"]:
-        block = [plural(w["search"], group["total"], name=group["name"])]
+        lots = []
         for lot in group["lots"]:
             facts = [w["sale"].format(when=sale(lot["sale_at"], lot["sale_date"], locale, tz))]
             if lot["high_bid"] is not None:
@@ -172,20 +173,18 @@ def summary_mail(payload: dict[str, Any], locale: str, tz: ZoneInfo,
                 facts.append(w["buy_now"].format(amount=money(lot["buy_it_now_price"],
                                                               lot["currency"])))
             others = [name for name in lot["searches"] if name != group["name"]]
-            block += indent([*heading(lot, locale), " · ".join(facts),
-                             *([w["also"].format(names=", ".join(others))] if others else []),
-                             lot_link(web_url, locale, lot)])
+            lots.append(lot_block(lot, [" · ".join(facts), *(
+                [w["also"].format(names=", ".join(others))] if others else [])], locale, web_url))
         if group["total"] > len(group["lots"]):
             query = urlencode(parse_qsl(group["query"]))
-            url = link(web_url, locale, "/active-lots" + (f"?{query}" if query else ""))
-            block += indent([w["see_all"].format(n=f"{group['total']:,}", url=url)])
-        parts.append("\n".join(block))
-    parts.append(footer(web_url, locale))
-    return plural(w["matches_subject"], payload["total"]), "\n\n".join(parts) + "\n"
+            url = mail.page(web_url, locale, "/active-lots" + (f"?{query}" if query else ""))
+            lots.append(mail.link(w["see_all"].format(n=f"{group['total']:,}"), url))
+        blocks.append(mail.section(plural(w["search"], group["total"], name=group["name"]), lots))
+    return finish(plural(w["matches_subject"], payload["total"]), blocks, locale, web_url)
 
 
 def news_mail(reminders: list[dict[str, Any]], changes: list[dict[str, Any]], locale: str,
-              tz: ZoneInfo, web_url: str) -> tuple[str, str]:
+              tz: ZoneInfo, web_url: str) -> mail.Mail:
     """Reminders due now, each with what changed on its lot, then the other saved lots that
     changed."""
     w = WORDS[locale]
@@ -197,19 +196,14 @@ def news_mail(reminders: list[dict[str, Any]], changes: list[dict[str, Any]], lo
         subject = w["change_subject"].format(title=title(changes[0]["lot"], locale))
     else:
         subject = w["changes_subject"].format(n=len(changes))
-    parts = []
+    blocks = []
     for item in reminders:
-        lot = item["lot"]
-        parts.append("\n".join([
-            w["reminder"]["hour" if "hour" in item["reminders"] else "day"],
-            *indent([*heading(lot, locale),
-                     w["starts"].format(when=when(lot["sale_at"], locale, tz)),
-                     *change_lines(lot, item["changes"], locale, tz),
-                     lot_link(web_url, locale, lot)])]))
+        lot, which = item["lot"], "hour" if "hour" in item["reminders"] else "day"
+        blocks.append(mail.section(w["reminder"][which], [
+            lot_block(lot, [w["starts"].format(when=when(lot["sale_at"], locale, tz)),
+                            *change_lines(lot, item["changes"], locale, tz)], locale, web_url)]))
     for item in changes:
         lot = item["lot"]
-        parts.append("\n".join([w["changed"], *indent([
-            *heading(lot, locale), *change_lines(lot, item["changes"], locale, tz),
-            lot_link(web_url, locale, lot)])]))
-    parts.append(footer(web_url, locale))
-    return subject, "\n\n".join(parts) + "\n"
+        blocks.append(mail.section(w["changed"], [
+            lot_block(lot, change_lines(lot, item["changes"], locale, tz), locale, web_url)]))
+    return finish(subject, blocks, locale, web_url)

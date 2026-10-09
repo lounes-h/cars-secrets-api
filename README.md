@@ -38,10 +38,20 @@ The Docker image also listens on port 8001. Publish it with `-p 8001:8001` when
 running the container; supply the database and other settings through the environment.
 
 The alert job (reminders, saved-lot changes, search summaries) runs inside the service every
-minute; `ALERTS_INTERVAL_SECONDS=0` turns it off. Without `SMTP_HOST`, its emails, confirmation
-codes and reset links are printed in the log. Without
+minute and retries the emails that failed; `ALERTS_INTERVAL_SECONDS=0` turns it off. Without
+`SMTP_HOST`, every email, confirmation codes and reset links included, is printed in the log.
+Without
 `TURNSTILE_SECRET`, the captcha is not enforced. Google and Apple sign-in answer
 `501 provider_not_configured` until their variables are set.
+
+## Sending email in production
+
+Every email goes out over SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`) from
+`MAIL_FROM`, as plain text and HTML. Any transactional provider that takes SMTP will do
+(Resend, Postmark, Amazon SES, …): send from an address on a domain you control, and add the
+SPF, DKIM and DMARC records the provider gives you, or the mail lands in spam. A Gmail account
+works for development only: it caps the day's sending and sends only from its own address.
+Set `EMAIL_CODE_SECRET` too: it keys the email waiting in the outbox as well as the codes.
 
 ## Moving accounts off the ingest database (once)
 
@@ -70,20 +80,20 @@ For a hosted API database, pipe the same dump into `psql "$DATABASE_URL"`.
 | `GET /api/lots/interpret?q=` | `{lot, make, model, year_min, year_max, q}`: the one lot a lot number or VIN names, or the make, model and years a search names and the words left over |
 | `GET /api/lots/{source}/{lot_number}` | One active lot, 404 otherwise |
 | `GET /api/lots/{source}/{lot_number}/images` | `{images: [{thumb, full}]}`: every photo the auction publishes for the lot, empty when it has none or is unreachable |
-| `POST /api/auth/register` | Always `{ok: true}`; mails a six-digit confirmation code (or an "account exists" hint) |
+| `POST /api/auth/register` | `{first_name, last_name, email, phone?, password, accept_terms, captcha_token?, locale, time_zone}`: the page's language (`en`, `es`) and the browser's zone become the dealer's settings, which every email follows. Always `{ok: true}`; mails a six-digit confirmation code (or an "account exists" hint, in the owner's language) |
 | `POST /api/auth/verify-email` | `{email, code, remember?}` → `{token, expires_at}`: confirms the address and signs in; `400 invalid_code`, `429 too_many_attempts` |
 | `POST /api/auth/resend-verification` | Always `{ok: true}`; a new code at most once a minute |
 | `POST /api/auth/login` | `{token, expires_at}`; `401`, `403 email_unverified` (a new code is mailed), `429 captcha_required` |
 | `POST /api/auth/logout`, `GET /api/auth/me` | Bearer session |
 | `POST /api/auth/forgot-password` | Always `{ok: true}`; sends the reset link |
-| `POST /api/auth/reset-password` | Sets the password from the emailed token, revokes all sessions |
+| `POST /api/auth/reset-password` | Sets the password from the emailed token, revokes all sessions, mails a "password changed" notice |
 | `POST /api/auth/oauth/{google\|apple}/start` | `{authorize_url, state}` |
 | `POST /api/auth/oauth/{google\|apple}/callback` | `{token, expires_at, new_user, redirect_to}` |
 | `GET /api/me/saved-lots` | Bearer session. `{items: [{lot, available, saved_at, change_alerts, remind_hour, remind_day}]}`, last saved first; `available` is false once the auction no longer lists the lot, which then reads as it was saved |
 | `GET`, `PUT`, `DELETE /api/me/saved-lots/{source}/{lot_number}` | One saved lot (`404 not_saved`); `PUT {change_alerts?, remind_hour?, remind_day?, locale?, time_zone?}` saves a listed lot (`404 lot_not_found`, `409 limit_reached` past 500) and switches what it names; `DELETE` removes it with its alerts and reminders |
 | `GET`, `POST /api/me/saved-searches` | `{items: [{id, name, query, alerts, created_at}]}`, newest first; `POST {name, query, alerts?, locale?, time_zone?}` (`409 limit_reached` past 50) |
 | `PATCH`, `DELETE /api/me/saved-searches/{id}` | Rename, new filters, pause or resume alerts (`404 not_found`); delete |
-| `GET`, `PUT /api/me/alert-settings` | `{email_matches, email_changes, email_reminders, twice_daily, time_zone, locale}`; `time_zone` and `locale` are null until set |
+| `GET`, `PUT /api/me/alert-settings` | `{email_matches, email_changes, email_reminders, twice_daily, time_zone, locale}`; `time_zone` and `locale` are set at registration, null for a Google or Apple account until its first save or Settings |
 | `GET /api/me/alerts?kind=&limit=&offset=` | `{items: [{id, kind, payload, created_at, read}], total, unread}`, newest first; `kind` is `matches`, `changes` or `reminder` |
 | `GET /api/me/alerts/unread`, `POST /api/me/alerts/read` | `{unread}`; `POST {ids?}` marks those alerts read, or all without `ids` |
 | `GET`, `PUT /api/me/lot-preferences` | Bearer session. `{filters, usage}`: the lot list's last filters (a query string, ≤ 2000 characters) and how often the dealer set each one; `PUT {filters}` keeps them and counts each set or changed parameter |
