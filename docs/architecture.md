@@ -150,8 +150,9 @@ Saving a lot copies it into `saved_lots`; the dealer's list shows each lot as th
 holds it now (a removed lot stays there until its auction is over) and, once it is purged, as it
 was saved, marked unavailable. Saving switches nothing on: change alerts, the 1-hour and 1-day
 reminders and a search's alerts each are. Turning change alerts on starts from what the lot says
-then; turning alerts on for a search, or giving it new filters, starts from now, so existing
-lots are never news.
+then, and so does setting reminders without change alerts (for its sale time and day only);
+turning alerts on for a search, or giving it new filters, starts from now, so existing lots are
+never news.
 
 `alerts.loop` runs `alerts.tick` every `ALERTS_INTERVAL_SECONDS` (60) in a thread of the API
 process, under a Postgres advisory lock (`hashtext('api:alerts')`), so only one process runs it
@@ -161,7 +162,9 @@ however many serve requests. One run:
 2. For every listed saved lot, finds the reminders due — the auction's `sale_at` minus 1 hour
    or 1 day has passed, the auction has not, the reminder was set before that time, and it has
    not gone out for this `sale_at` — and, with change alerts on, a different sale time, sale
-   day or Buy now price (0 is none) than the dealer was last told. Per dealer, in one
+   day or Buy now price (0 is none) than the dealer was last told; with reminders on, a future
+   sale (no time, no day) as last told that now has a date, reported as its date alone ("Auction
+   date set: …"), change alerts or not. Per dealer, in one
    transaction: an inbox entry per reminded lot with that lot's changes folded in, one entry for
    the other changed lots, the new "told" and "sent for" values, and one email.
 3. For each dealer with a search's alerts on whose summary time (7:00, or 7:00 and 17:00, in

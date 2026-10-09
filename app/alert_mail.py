@@ -39,6 +39,7 @@ WORDS: dict[str, dict[str, Any]] = {
                   "comes up.",
         "changed": "Saved lot changed",
         "sale_change": "Auction: {old} → {new}",
+        "sale_set": "Auction date set: {new}",
         "buy_now_change": "Buy now: {old} → {new}",
         "alerts": "Your alerts",
         "settings": "Choose what we email you",
@@ -73,6 +74,7 @@ WORDS: dict[str, dict[str, Any]] = {
                   "en que sale este lote.",
         "changed": "Un lote guardado cambió",
         "sale_change": "Subasta: {old} → {new}",
+        "sale_set": "Fecha de subasta fijada: {new}",
         "buy_now_change": "Compra inmediata: {old} → {new}",
         "alerts": "Tus alertas",
         "settings": "Elige qué te enviamos por correo",
@@ -132,8 +134,10 @@ def change_lines(lot: dict[str, Any], changes: dict[str, Any] | None, locale: st
                  tz: ZoneInfo) -> list[str]:
     w, lines = WORDS[locale], []
     if changes and (moved := changes.get("sale")):
-        lines.append(w["sale_change"].format(
-            old=sale(moved["from"]["at"], moved["from"]["date"], locale, tz),
+        old = moved["from"]
+        # A future sale given its date reads as set, not as "Future sale → …".
+        lines.append(w["sale_change" if old["at"] or old["date"] else "sale_set"].format(
+            old=sale(old["at"], old["date"], locale, tz),
             new=sale(moved["to"]["at"], moved["to"]["date"], locale, tz)))
     if changes and (price := changes.get("buy_now")):
         lines.append(w["buy_now_change"].format(old=offer(price["from"], lot["currency"], locale),

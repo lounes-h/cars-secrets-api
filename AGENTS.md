@@ -191,7 +191,8 @@ Saved lots and searches, and their alerts (`/api/me/saved-lots`, `/api/me/saved-
 `/api/me/alerts`, `/api/me/alert-settings`): reminders 1 hour and 1 day before the auction's
 scheduled start (once per schedule, so they follow it when it moves; a lot no longer listed
 cancels them), a saved lot's auction time and Buy now changes at the next run of the job (a
-minute), and new lots matching a saved search in a summary at 7:00, or 7:00 and 17:00, in the
+minute), a future sale given its date to a dealer with reminders on it even without change alerts,
+and new lots matching a saved search in a summary at 7:00, or 7:00 and 17:00, in the
 dealer's zone. Each lands in the dealer's inbox, and by email unless Settings turns that kind off.
 
 Not done: terms of use and privacy policy documents, profile editing, email change, account

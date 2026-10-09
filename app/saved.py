@@ -120,18 +120,21 @@ def save_lot(source: str, lot_number: str, body: SavedLotIn, user: User,
                for name in SWITCHES}
         armed = any(new[name] and not old[name] for name in ("remind_hour", "remind_day"))
         told = live if new["change_alerts"] and not old["change_alerts"] and live else None
+        # Reminders set without change alerts: the dealer knows the date the page shows, so only a
+        # date set from now on is news (`SCHEDULED` in app/alerts.py).
+        seen = live if armed and not new["change_alerts"] else told
         conn.execute(
             """UPDATE app.saved_lots SET change_alerts = %(change_alerts)s,
                    remind_hour = %(remind_hour)s, remind_day = %(remind_day)s,
                    reminders_set_at = CASE WHEN %(armed)s THEN now() ELSE reminders_set_at END,
-                   told_sale_at = CASE WHEN %(told)s THEN %(sale_at)s ELSE told_sale_at END,
-                   told_sale_date = CASE WHEN %(told)s THEN %(sale_date)s ELSE told_sale_date END,
+                   told_sale_at = CASE WHEN %(seen)s THEN %(sale_at)s ELSE told_sale_at END,
+                   told_sale_date = CASE WHEN %(seen)s THEN %(sale_date)s ELSE told_sale_date END,
                    told_buy_now = CASE WHEN %(told)s THEN %(buy_now)s::numeric
                                        ELSE told_buy_now END
                WHERE user_id = %(user)s AND source = %(source)s AND lot_number = %(lot)s""",
-            key | new | {"armed": armed, "told": told is not None,
-                         "sale_at": told and told["sale_at"],
-                         "sale_date": told and told["sale_date"],
+            key | new | {"armed": armed, "told": told is not None, "seen": seen is not None,
+                         "sale_at": seen and seen["sale_at"],
+                         "sale_date": seen and seen["sale_date"],
                          "buy_now": told and told["buy_it_now_price"]})
         seed_settings(conn, user["id"], body)
     return saved_lots(conn, user["id"], (source, lot_number))[0]

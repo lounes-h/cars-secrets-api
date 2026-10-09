@@ -5,6 +5,8 @@ process (`loop`, started by app/main.py).
   once per schedule, so it follows the auction when it moves.
 - A saved lot's changes (its auction time, its Buy now price) go out at the next run, measured
   against what the dealer was last told: a value that changes back says nothing.
+- A future sale given its date is news for a dealer with reminders on it too, change alerts or
+  not: their reminders wait for that date.
 - Lots first seen since a search's last summary that match it go out at 7:00, or 7:00 and
   17:00, in the dealer's zone. Updates to older lots never do.
 
@@ -168,6 +170,9 @@ DEALER = """u.email, u.email_verified_at IS NOT NULL AS verified,
 CHANGED = """(s.change_alerts AND (l.sale_at IS DISTINCT FROM s.told_sale_at
     OR l.sale_date IS DISTINCT FROM s.told_sale_date
     OR l.buy_it_now_price IS DISTINCT FROM s.told_buy_now))"""
+# A future sale given its date, for a dealer whose reminders wait for it: only the date is news.
+SCHEDULED = """((s.remind_hour OR s.remind_day) AND s.told_sale_at IS NULL
+    AND s.told_sale_date IS NULL AND (l.sale_at IS NOT NULL OR l.sale_date IS NOT NULL))"""
 # A lot no longer listed keeps no reminders; it sends no changes either (`lot_news`).
 CANCEL_REMINDERS = """UPDATE app.saved_lots s SET remind_hour = false, remind_day = false
     WHERE (remind_hour OR remind_day) AND NOT EXISTS (
@@ -254,13 +259,14 @@ def lot_news(conn: psycopg.Connection, now: datetime) -> list[list[dict[str, Any
     """Every listed saved lot with a reminder due or a change to tell, by dealer."""
     rows = conn.execute(
         f"""SELECT s.user_id, s.change_alerts, s.told_sale_at, s.told_sale_date, s.told_buy_now,
-                   {due('hour')} AS hour_due, {due('day')} AS day_due, {DEALER}, l.*
+                   {due('hour')} AS hour_due, {due('day')} AS day_due,
+                   {SCHEDULED} AS scheduled, {DEALER}, l.*
             FROM app.saved_lots s
             JOIN app.users u ON u.id = s.user_id
             LEFT JOIN app.alert_settings st ON st.user_id = s.user_id
             JOIN LATERAL (SELECT {COLUMNS} FROM lots WHERE lots.source = s.source
                           AND lots.lot_number = s.lot_number AND lots.removed_at IS NULL) l ON true
-            WHERE {CHANGED} OR {due('hour')} OR {due('day')}
+            WHERE {CHANGED} OR {SCHEDULED} OR {due('hour')} OR {due('day')}
             ORDER BY s.user_id, l.sale_at NULLS LAST, l.lot_number""",
         {"now": now, "hour": HOUR, "day": DAY}).fetchall()
     return [list(rows) for _, rows in groupby(rows, key=lambda row: row["user_id"])]
@@ -274,7 +280,9 @@ def send_lot_news(conn: psycopg.Connection, state: Any, rows: list[dict[str, Any
     reminders, changes, starts = [], [], []
     for row in rows:
         lot = summary(to_lot(row))
-        diff = differences(row) if row["change_alerts"] else None
+        diff = differences(row) if row["change_alerts"] or row["scheduled"] else None
+        if diff and not row["change_alerts"]:
+            diff = {"sale": diff["sale"]}
         if which := [name for name in ("day", "hour") if row[f"{name}_due"]]:
             reminders.append({"lot": lot, "reminders": which, "changes": diff})
             starts.append(row["sale_at"])
@@ -300,7 +308,8 @@ def send_lot_news(conn: psycopg.Connection, state: Any, rows: list[dict[str, Any
                        told_buy_now = CASE WHEN %(told)s THEN %(buy_now)s::numeric
                                            ELSE told_buy_now END
                    WHERE user_id = %(user)s AND source = %(source)s AND lot_number = %(lot)s""",
-                {"hour": row["hour_due"], "day": row["day_due"], "told": row["change_alerts"],
+                {"hour": row["hour_due"], "day": row["day_due"],
+                 "told": row["change_alerts"] or row["scheduled"],
                  "sale_at": row["sale_at"], "sale_date": row["sale_date"],
                  "buy_now": row["buy_it_now_price"], "user": row["user_id"],
                  "source": row["source"], "lot": row["lot_number"]})
