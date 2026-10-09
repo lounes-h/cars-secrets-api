@@ -1,3 +1,9 @@
+## [0.4.0](https://github.com/lounes-h/cars-secrets-api/compare/v0.3.0...v0.4.0) (2026-10-09)
+
+### Features
+
+* send every email as text and HTML in the dealer's language, through a retrying outbox ([b874317](https://github.com/lounes-h/cars-secrets-api/commit/b874317855d146b40a966d8cdd012859bb57a44c))
+
 ## [0.3.0](https://github.com/lounes-h/cars-secrets-api/compare/v0.2.0...v0.3.0) (2026-10-08)
 
 ### Features
