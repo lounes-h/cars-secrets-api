@@ -36,6 +36,10 @@ def test_the_password_changed_notice_offers_a_reset():
     assert "Reset your password: https://cars.test/forgot-password" in notice.text
     assert 'href="https://cars.test/forgot-password"' in notice.html
     assert "Restablecer la contraseña" in mail.password_changed_mail("es", WEB).text
+    # No talk of losing the account: it worries a dealer who changed it themselves.
+    assert "If it was not you, reset your password now:" in notice.text
+    assert "take the account back" not in notice.text
+    assert "recuperar la cuenta" not in mail.password_changed_mail("es", WEB).text
 
 
 @pytest.mark.parametrize("message", [

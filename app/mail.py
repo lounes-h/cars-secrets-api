@@ -185,8 +185,7 @@ WORDS: dict[str, dict[str, str]] = {
         "changed_intro": f"The password of your {BRAND} account was just changed, and every "
                          "device signed in to it was signed out.",
         "changed_you": "If it was you, there is nothing to do.",
-        "changed_not_you": "If it was not you, reset your password now to take the account "
-                           "back:",
+        "changed_not_you": "If it was not you, reset your password now:",
         "changed_button": "Reset your password",
     },
     "es": {
@@ -213,8 +212,7 @@ WORDS: dict[str, dict[str, str]] = {
         "changed_intro": f"La contraseña de tu cuenta de {BRAND} acaba de cambiar y se cerró la "
                          "sesión en todos los dispositivos.",
         "changed_you": "Si fuiste tú, no tienes que hacer nada.",
-        "changed_not_you": "Si no fuiste tú, restablece tu contraseña ahora para recuperar la "
-                           "cuenta:",
+        "changed_not_you": "Si no fuiste tú, restablece tu contraseña ahora:",
         "changed_button": "Restablecer la contraseña",
     },
 }
