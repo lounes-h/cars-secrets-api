@@ -3,6 +3,7 @@ import time
 from datetime import UTC, datetime
 
 import psycopg
+import pytest
 from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 
@@ -344,6 +345,100 @@ def test_a_lot_no_longer_listed_sends_no_changes(client, mailer, conn):
     run(client, "2026-10-08T12:00Z")
 
     assert mailer.sent[start:] == [] and inbox(conn) == []
+
+
+# --- auctions that ended -----------------------------------------------------------------------
+
+def ended(client, mailer, conn, sale_status: str | None, **switches) -> dict:
+    """Dana's saved lot 1, whose auction on Oct 1 is over: the auction no longer lists it."""
+    headers = dealer(client, mailer)
+    insert_lot(conn, "1", sale_status=sale_status)
+    save(client, headers, **switches)
+    conn.execute("UPDATE lots SET removed_at = '2026-10-01T18:00Z'")
+    run(client, "2026-10-01T18:01Z")
+    return headers
+
+
+def relist(conn, sale_at="2026-10-15T15:00Z") -> None:
+    """Back for another auction, once the API database had dropped it."""
+    conn.execute("DELETE FROM lots")
+    insert_lot(conn, "1", sale_at=sale_at, last_changed_at="2026-10-08T00:00Z")
+
+
+def relist_alert(conn) -> bool:
+    return conn.execute("SELECT relist_alert FROM app.saved_lots").fetchone()["relist_alert"]
+
+
+def test_the_saved_copy_follows_the_lot_until_the_api_database_drops_it(client, mailer, conn):
+    headers = dealer(client, mailer)
+    insert_lot(conn, "1", sale_status="On Minimum Bid", high_bid=1500)
+    save(client, headers)
+    conn.execute("UPDATE lots SET sale_at = '2026-10-03T15:00Z', sale_status = 'On Approval', "
+                 "high_bid = 2100, last_changed_at = '2026-10-02T00:00Z'")
+
+    run(client, "2026-10-02T12:00Z")
+    conn.execute("DELETE FROM lots")
+
+    lot = client.get("/api/me/saved-lots/copart/1", headers=headers).json()["lot"]
+    assert (lot["sale_status"], lot["high_bid"]) == ("On Approval", 2100)
+    assert instant(lot["sale_at"]) == datetime(2026, 10, 3, 15, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("sale_status", ["On Minimum Bid", "ON APPROVAL"])
+def test_a_lot_that_may_not_have_sold_tells_the_dealer_when_it_is_listed_again(
+        client, mailer, conn, sale_status):
+    ended(client, mailer, conn, sale_status)  # nothing switched on
+    assert relist_alert(conn) and inbox(conn) == []
+    start = len(mailer.sent)
+
+    relist(conn)
+    run(client, "2026-10-08T12:00Z")
+    run(client, "2026-10-08T12:01Z")
+
+    [(_, subject, body)] = mailer.sent[start:]
+    assert subject == "A saved lot changed: 2020 TOYOTA CAMRY · Relisted"
+    assert "Relisted · Auction: Thu, Oct 15, 3:00 PM UTC" in body
+    [entry] = inbox(conn)
+    [lot] = entry["payload"]["lots"]
+    assert entry["kind"] == "changes" and set(lot["changes"]) == {"relisted"}
+    assert instant(lot["changes"]["relisted"]["at"]) == datetime(2026, 10, 15, 15, tzinfo=UTC)
+    assert not relist_alert(conn)
+
+
+def test_a_relisted_lot_with_change_alerts_reads_as_relisted_not_moved(client, mailer, conn):
+    ended(client, mailer, conn, "On Approval", change_alerts=True)
+    start = len(mailer.sent)
+
+    relist(conn)
+    run(client, "2026-10-08T12:00Z")
+    run(client, "2026-10-08T12:01Z")
+
+    [(_, subject, body)] = mailer.sent[start:]
+    assert subject.endswith("· Relisted") and "→" not in body
+    assert [set(lot["changes"]) for lot in inbox(conn)[0]["payload"]["lots"]] == [{"relisted"}]
+
+
+@pytest.mark.parametrize("sale_status", ["Pure Sale", None])
+def test_a_pure_sale_or_a_sale_type_not_stated_comes_back_without_news(client, mailer, conn,
+                                                                       sale_status):
+    ended(client, mailer, conn, sale_status)
+    assert not relist_alert(conn)
+    start = len(mailer.sent)
+
+    relist(conn)
+    run(client, "2026-10-08T12:00Z")
+
+    assert mailer.sent[start:] == [] and inbox(conn) == []
+
+
+def test_a_lot_still_listed_after_its_auction_waits_to_be_dropped(client, mailer, conn):
+    headers = dealer(client, mailer)
+    insert_lot(conn, "1", sale_status="On Minimum Bid")
+    save(client, headers)
+
+    run(client, "2026-10-01T18:00Z")  # bidding may still be going on
+
+    assert not relist_alert(conn) and inbox(conn) == []
 
 
 def test_a_reminder_and_a_change_due_together_are_one_email(client, mailer, conn):

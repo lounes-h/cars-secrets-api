@@ -1,5 +1,6 @@
-"""A dealer's saved lots and saved searches. Saving notifies nobody: change alerts, reminders and
-a search's alerts are each switched on separately, and app/alerts.py sends them."""
+"""A dealer's saved lots and saved searches. Saving switches nothing on: change alerts, reminders
+and a search's alerts each are, and app/alerts.py sends them. The one alert a saved lot always gets
+is "Relisted", once an auction that may not have sold lists it again."""
 
 from datetime import datetime
 from typing import Annotated, Any, get_origin
@@ -52,7 +53,8 @@ SWITCHES = ("change_alerts", "remind_hour", "remind_day")
 def saved_lots(conn: psycopg.Connection, user_id: Any,
                key: tuple[str, str] | None = None) -> list[SavedLot]:
     """The dealer's saved lots, last saved first: each as the API database holds it now
-    (removed lots stay there until their auction is over), or as it was when saved."""
+    (removed lots stay there until their auction is over), or as it was when last seen there
+    (the alert job keeps the saved copy in step)."""
     where, params = "user_id = %(user)s", {"user": user_id}
     if key:
         where += " AND source = %(source)s AND lot_number = %(lot)s"

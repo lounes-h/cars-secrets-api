@@ -39,11 +39,12 @@ WORDS: dict[str, dict[str, Any]] = {
                      "day": "Auction reminder, 1 day before"},
         "starts": "The auction starts {when}. That is when the auction opens, not when this lot "
                   "comes up.",
-        "what": {"sale": "auction date changed", "sale_set": "auction date set",
-                 "buy_now": "Buy now price changed"},
+        "what": {"relisted": "relisted", "sale": "auction date changed",
+                 "sale_set": "auction date set", "buy_now": "Buy now price changed"},
         "and": " and ",
         "sale_change": "Auction: {old} → {new}",
         "sale_set": "Auction date set: {new}",
+        "relisted": "Relisted · Auction: {new}",
         "buy_now_change": "Buy now: {old} → {new}",
         "alerts": "Your alerts",
         "settings": "Choose what we email you",
@@ -77,11 +78,13 @@ WORDS: dict[str, dict[str, Any]] = {
                      "day": "Recordatorio de subasta, 1 día antes"},
         "starts": "La subasta empieza el {when}. Es la hora en que abre la subasta, no la hora "
                   "en que sale este lote.",
-        "what": {"sale": "cambió la fecha de la subasta", "sale_set": "fecha de subasta fijada",
+        "what": {"relisted": "publicado de nuevo", "sale": "cambió la fecha de la subasta",
+                 "sale_set": "fecha de subasta fijada",
                  "buy_now": "cambió el precio de compra inmediata"},
         "and": " y ",
         "sale_change": "Subasta: {old} → {new}",
         "sale_set": "Fecha de subasta fijada: {new}",
+        "relisted": "Publicado de nuevo · Subasta: {new}",
         "buy_now_change": "Compra inmediata: {old} → {new}",
         "alerts": "Tus alertas",
         "settings": "Elige qué te enviamos por correo",
@@ -143,8 +146,11 @@ def dated(time: dict[str, Any]) -> bool:
 
 def what(changes: list[dict[str, Any]], locale: str) -> str:
     """What changed on these lots: "Auction date set and Buy now price changed". A future sale
-    given its date reads as set, not as changed."""
+    given its date reads as set, not as changed; a lot whose auction ended, listed again, as
+    relisted."""
     w, parts = WORDS[locale], []
+    if any("relisted" in item for item in changes):
+        parts.append(w["what"]["relisted"])
     if sales := [item["sale"] for item in changes if "sale" in item]:
         moved = any(dated(one["from"]) for one in sales)
         parts.append(w["what"]["sale" if moved else "sale_set"])
@@ -163,6 +169,8 @@ def change(template: str, old: str, new: str) -> mail.Block:
 def change_lines(lot: dict[str, Any], changes: dict[str, Any] | None, locale: str,
                  tz: ZoneInfo) -> list[mail.Block]:
     w, lines = WORDS[locale], []
+    if changes and (back := changes.get("relisted")):
+        lines.append(change(w["relisted"], "", sale(back["at"], back["date"], locale, tz)))
     if changes and (moved := changes.get("sale")):
         old = moved["from"]
         # A future sale given its date reads as set, not as "Future sale → …".

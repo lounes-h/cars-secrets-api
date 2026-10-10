@@ -7,6 +7,9 @@ process (`loop`, started by app/main.py).
   against what the dealer was last told: a value that changes back says nothing.
 - A future sale given its date is news for a dealer with reminders on it too, change alerts or
   not: their reminders wait for that date.
+- A saved lot whose auction ended on a minimum bid or the seller's approval may not have sold;
+  when the auction lists it again, the dealer is told at the next run, whatever they switched
+  on. Each saved lot's copy follows the lot meanwhile, so Saved shows the last it said.
 - Lots first seen since a search's last summary that match it go out at 7:00, or 7:00 and
   17:00, in the dealer's zone. Updates to older lots never do.
 
@@ -173,11 +176,22 @@ CHANGED = """(s.change_alerts AND (l.sale_at IS DISTINCT FROM s.told_sale_at
 # A future sale given its date, for a dealer whose reminders wait for it: only the date is news.
 SCHEDULED = """((s.remind_hour OR s.remind_day) AND s.told_sale_at IS NULL
     AND s.told_sale_date IS NULL AND (l.sale_at IS NOT NULL OR l.sale_date IS NOT NULL))"""
+UNLISTED = """NOT EXISTS (SELECT 1 FROM lots l WHERE l.source = s.source
+    AND l.lot_number = s.lot_number AND l.removed_at IS NULL)"""
 # A lot no longer listed keeps no reminders; it sends no changes either (`lot_news`).
-CANCEL_REMINDERS = """UPDATE app.saved_lots s SET remind_hour = false, remind_day = false
-    WHERE (remind_hour OR remind_day) AND NOT EXISTS (
-        SELECT 1 FROM lots l WHERE l.source = s.source AND l.lot_number = s.lot_number
-        AND l.removed_at IS NULL)"""
+CANCEL_REMINDERS = f"""UPDATE app.saved_lots s SET remind_hour = false, remind_day = false
+    WHERE (remind_hour OR remind_day) AND {UNLISTED}"""
+# A lot leaves the list once its auction is over. On a minimum bid or the seller's approval it
+# may not have sold and may come back, which the dealer hears (`lot_news`); a pure sale goes to
+# the highest bid, and a sale type not stated promises nothing.
+WATCH_RELIST = f"""UPDATE app.saved_lots s SET relist_alert = true WHERE NOT relist_alert
+    AND upper(trim(s.lot->>'sale_status')) IN ('ON MINIMUM BID', 'ON APPROVAL') AND {UNLISTED}"""
+# The saved lots whose copy is older than the lot the API database holds: it follows the lot, so
+# what the lot last said (its auction, its sale type) stands in once the lot is purged.
+FOLLOW = f"""SELECT s.user_id, l.* FROM app.saved_lots s
+    JOIN LATERAL (SELECT {COLUMNS} FROM lots WHERE lots.source = s.source
+                  AND lots.lot_number = s.lot_number) l ON true
+    WHERE l.last_changed_at IS DISTINCT FROM (s.lot->>'last_changed_at')::timestamptz"""
 
 
 def due(which: str) -> str:
@@ -206,7 +220,9 @@ def tick(state: Any, now: datetime | None = None) -> None:
                             ).fetchone()["ok"]:
             return
         try:
+            follow(conn)
             conn.execute(CANCEL_REMINDERS)
+            conn.execute(WATCH_RELIST)
             for rows in lot_news(conn, now):
                 guarded(send_lot_news, conn, state, rows, now)
             for dealer in due_summaries(conn, now):
@@ -222,6 +238,16 @@ def guarded(work: Any, *args: Any) -> None:
         work(*args)
     except Exception:
         log.exception("alerts: one dealer's alerts failed")
+
+
+def follow(conn: psycopg.Connection) -> None:
+    rows = conn.execute(FOLLOW).fetchall()
+    with conn.cursor() as cur:
+        cur.executemany(
+            """UPDATE app.saved_lots SET lot = %s
+               WHERE user_id = %s AND source = %s AND lot_number = %s""",
+            [(Jsonb(to_lot(row).model_dump(mode="json")), row["user_id"], row["source"],
+              row["lot_number"]) for row in rows])
 
 
 def summary(lot: Lot) -> dict[str, Any]:
@@ -256,17 +282,18 @@ def iso(value: Any) -> str | None:
 
 
 def lot_news(conn: psycopg.Connection, now: datetime) -> list[list[dict[str, Any]]]:
-    """Every listed saved lot with a reminder due or a change to tell, by dealer."""
+    """Every listed saved lot with a reminder due or a change to tell, or listed again, by
+    dealer."""
     rows = conn.execute(
         f"""SELECT s.user_id, s.change_alerts, s.told_sale_at, s.told_sale_date, s.told_buy_now,
                    {due('hour')} AS hour_due, {due('day')} AS day_due,
-                   {SCHEDULED} AS scheduled, {DEALER}, l.*
+                   {SCHEDULED} AS scheduled, s.relist_alert AS relisted, {DEALER}, l.*
             FROM app.saved_lots s
             JOIN app.users u ON u.id = s.user_id
             LEFT JOIN app.alert_settings st ON st.user_id = s.user_id
             JOIN LATERAL (SELECT {COLUMNS} FROM lots WHERE lots.source = s.source
                           AND lots.lot_number = s.lot_number AND lots.removed_at IS NULL) l ON true
-            WHERE {CHANGED} OR {SCHEDULED} OR {due('hour')} OR {due('day')}
+            WHERE {CHANGED} OR {SCHEDULED} OR {due('hour')} OR {due('day')} OR s.relist_alert
             ORDER BY s.user_id, l.sale_at NULLS LAST, l.lot_number""",
         {"now": now, "hour": HOUR, "day": DAY}).fetchall()
     return [list(rows) for _, rows in groupby(rows, key=lambda row: row["user_id"])]
@@ -283,6 +310,9 @@ def send_lot_news(conn: psycopg.Connection, state: Any, rows: list[dict[str, Any
         diff = differences(row) if row["change_alerts"] or row["scheduled"] else None
         if diff and not row["change_alerts"]:
             diff = {"sale": diff["sale"]}
+        if row["relisted"]:
+            # Its new auction, rather than a move from the one that ended.
+            diff = {"relisted": {"at": iso(row["sale_at"]), "date": iso(row["sale_date"])}}
         if which := [name for name in ("day", "hour") if row[f"{name}_due"]]:
             reminders.append({"lot": lot, "reminders": which, "changes": diff})
             starts.append(row["sale_at"])
@@ -306,10 +336,12 @@ def send_lot_news(conn: psycopg.Connection, state: Any, rows: list[dict[str, Any
                        told_sale_date = CASE WHEN %(told)s THEN %(sale_date)s
                                              ELSE told_sale_date END,
                        told_buy_now = CASE WHEN %(told)s THEN %(buy_now)s::numeric
-                                           ELSE told_buy_now END
+                                           ELSE told_buy_now END,
+                       relist_alert = relist_alert AND NOT %(relisted)s
                    WHERE user_id = %(user)s AND source = %(source)s AND lot_number = %(lot)s""",
                 {"hour": row["hour_due"], "day": row["day_due"],
-                 "told": row["change_alerts"] or row["scheduled"],
+                 "told": row["change_alerts"] or row["scheduled"] or row["relisted"],
+                 "relisted": row["relisted"],
                  "sale_at": row["sale_at"], "sale_date": row["sale_date"],
                  "buy_now": row["buy_it_now_price"], "user": row["user_id"],
                  "source": row["source"], "lot": row["lot_number"]})
