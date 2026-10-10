@@ -98,6 +98,23 @@ def test_a_date_set_on_one_lot_and_moved_on_another_reads_as_changed():
         "Fecha de subasta fijada")
 
 
+def test_a_lot_listed_again_reads_as_relisted_with_its_new_auction():
+    back = {"lot": LOT, "changes": {"relisted": {"at": LOT["sale_at"], "date": None}}}
+    cheaper = {"lot": LOT | {"lot_number": "8"}, "changes": {
+        "buy_now": {"from": 9500.0, "to": 8900.0}}}
+
+    subject, body, page = alert_mail.news_mail([], [back], "en", NEW_YORK, "https://web.test")
+    asunto, cuerpo, _ = alert_mail.news_mail([], [back, cheaper], "es", MEXICO,
+                                             "https://web.test")
+
+    assert subject == "A saved lot changed: 2021 HONDA CIVIC EX · Relisted"
+    assert "Relisted · Auction: Thu, Oct 8, 11:00 AM EDT" in body
+    assert "<div>Relisted · Auction: <strong>Thu, Oct 8, 11:00 AM EDT</strong></div>" in page
+    assert asunto == ("2 lotes guardados cambiaron · Publicado de nuevo y cambió el precio de "
+                      "compra inmediata")
+    assert "Publicado de nuevo · Subasta: jue 8 oct, 9:00 a. m. CST" in cuerpo
+
+
 def test_a_summary_in_spanish():
     found = LOT | {"high_bid": 1500.0, "buy_it_now_price": 4000.0, "searches": ["Hondas"]}
     unbid = LOT | {"lot_number": "8", "searches": ["Hondas"]}  # no bid yet, no Buy now

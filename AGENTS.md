@@ -66,7 +66,8 @@ See `docs/architecture.md` for details.
   `app/alerts.py`, its emails (English and Spanish) in `app/alert_mail.py`. The job runs in the
   API process every `ALERTS_INTERVAL_SECONDS` (0 = off, as in the tests, which call
   `alerts.tick` with a clock of their own); a Postgres advisory lock keeps it to one process.
-  Saving notifies nobody: change alerts, reminders and a search's alerts are each switched on.
+  Saving switches nothing on: change alerts, reminders and a search's alerts each are. The one
+  alert a saved lot always gets is "Relisted", for an auction that may not have sold.
 - Auth flows are in `app/auth.py`, storage in `app/accounts.py`, primitives in
   `app/security.py`, `app/mail.py` and `app/oauth.py`. Outbound HTTP goes through
   `app.state.http` and mail through `app.state.mailer`, so tests can substitute both via
@@ -191,7 +192,10 @@ Saved lots and searches, and their alerts (`/api/me/saved-lots`, `/api/me/saved-
 `/api/me/alerts`, `/api/me/alert-settings`): reminders 1 hour and 1 day before the auction's
 scheduled start (once per schedule, so they follow it when it moves; a lot no longer listed
 cancels them), a saved lot's auction time and Buy now changes at the next run of the job (a
-minute), a future sale given its date to a dealer with reminders on it even without change alerts,
+minute), a saved lot whose auction ended on a minimum bid or the seller's approval listed again
+("Relisted", to every dealer who saved it, whatever they switched on; each saved lot's copy
+follows the lot, so its last sale type and auction outlive it), a future sale given its date
+to a dealer with reminders on it even without change alerts,
 and new lots matching a saved search in a summary at 7:00, or 7:00 and 17:00, in the
 dealer's zone. Each lands in the dealer's inbox, and by email unless Settings turns that kind off.
 A changes email's subject says what changed after the lot ("A saved lot changed: 2013 ACURA TSX ·

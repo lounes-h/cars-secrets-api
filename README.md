@@ -89,7 +89,7 @@ For a hosted API database, pipe the same dump into `psql "$DATABASE_URL"`.
 | `POST /api/auth/reset-password` | Sets the password from the emailed token, revokes all sessions, mails a "password changed" notice |
 | `POST /api/auth/oauth/{google\|apple}/start` | `{authorize_url, state}` |
 | `POST /api/auth/oauth/{google\|apple}/callback` | `{token, expires_at, new_user, redirect_to}` |
-| `GET /api/me/saved-lots` | Bearer session. `{items: [{lot, available, saved_at, change_alerts, remind_hour, remind_day}]}`, last saved first; `available` is false once the auction no longer lists the lot, which then reads as it was saved |
+| `GET /api/me/saved-lots` | Bearer session. `{items: [{lot, available, saved_at, change_alerts, remind_hour, remind_day}]}`, last saved first; `available` is false once the auction no longer lists the lot, which then reads as it was last seen |
 | `GET`, `PUT`, `DELETE /api/me/saved-lots/{source}/{lot_number}` | One saved lot (`404 not_saved`); `PUT {change_alerts?, remind_hour?, remind_day?, locale?, time_zone?}` saves a listed lot (`404 lot_not_found`, `409 limit_reached` past 500) and switches what it names; `DELETE` removes it with its alerts and reminders |
 | `GET`, `POST /api/me/saved-searches` | `{items: [{id, name, query, alerts, created_at}]}`, newest first; `POST {name, query, alerts?, locale?, time_zone?}` (`409 limit_reached` past 50) |
 | `PATCH`, `DELETE /api/me/saved-searches/{id}` | Rename, new filters, pause or resume alerts (`404 not_found`); delete |

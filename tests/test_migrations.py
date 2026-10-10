@@ -8,5 +8,5 @@ def test_app_schema_is_created_by_migrations(conn):
             "lot_preferences", "saved_searches", "saved_lots", "alert_settings", "alerts",
             "outbox", "alembic_version"} <= tables
     assert conn.execute("SELECT version_num FROM app.alembic_version").fetchone() == {
-        "version_num": "0005"
+        "version_num": "0006"
     }

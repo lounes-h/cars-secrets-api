@@ -148,8 +148,10 @@ a Toyota, but "1500" is Ram's and GMC's, so it stays a word).
 
 Saving a lot copies it into `saved_lots`; the dealer's list shows each lot as the API database
 holds it now (a removed lot stays there until its auction is over) and, once it is purged, as it
-was saved, marked unavailable. Saving switches nothing on: change alerts, the 1-hour and 1-day
-reminders and a search's alerts each are. Turning change alerts on starts from what the lot says
+was last seen there (the alert job keeps the saved copy, `saved_lots.lot`, in step), marked
+unavailable. Saving switches nothing on: change alerts, the 1-hour and 1-day reminders and a
+search's alerts each are; only a lot listed again after an auction that may not have sold is news
+without them (below). Turning change alerts on starts from what the lot says
 then, and so does setting reminders without change alerts (for its sale time and day only);
 turning alerts on for a search, or giving it new filters, starts from now, so existing lots are
 never news.
@@ -158,16 +160,26 @@ never news.
 process, under a Postgres advisory lock (`hashtext('api:alerts')`), so only one process runs it
 however many serve requests. One run:
 
-1. Clears the reminders of saved lots no longer listed (`removed_at`, or purged).
-2. For every listed saved lot, finds the reminders due — the auction's `sale_at` minus 1 hour
+1. Brings each saved lot's copy (`saved_lots.lot`) up to the lot the API database holds, when
+   its `last_changed_at` differs, so the last the lot said (its auction, its sale type) stands in
+   once it is purged.
+2. Clears the reminders of saved lots no longer listed (`removed_at`, or purged), and marks
+   those whose auction ended on a minimum bid or the seller's approval (`sale_status` "On
+   Minimum Bid" or "On Approval", any case) as `relist_alert`: they may not have sold, and may
+   be listed again. A pure sale goes to the highest bid, and a sale type not stated promises
+   nothing, so neither is marked.
+3. For every listed saved lot, finds the reminders due — the auction's `sale_at` minus 1 hour
    or 1 day has passed, the auction has not, the reminder was set before that time, and it has
    not gone out for this `sale_at` — and, with change alerts on, a different sale time, sale
    day or Buy now price (0 is none) than the dealer was last told; with reminders on, a future
    sale (no time, no day) as last told that now has a date, reported as its date alone ("Auction
-   date set: …"), change alerts or not. Per dealer, in one
+   date set: …"), change alerts or not; and, whatever is switched on, a `relist_alert` lot listed
+   again, reported as relisted with its new auction alone ("Relisted · Auction: …"), not as a
+   move from the auction that ended. Per dealer, in one
    transaction: an inbox entry per reminded lot with that lot's changes folded in, one entry for
-   the other changed lots, the new "told" and "sent for" values, and one email.
-3. For each dealer with a search's alerts on whose summary time (7:00, or 7:00 and 17:00, in
+   the other changed lots, the new "told" and "sent for" values (a relisted lot's mark cleared),
+   and one email.
+4. For each dealer with a search's alerts on whose summary time (7:00, or 7:00 and 17:00, in
    their zone) has come since `summary_at`: each such search's lots first seen in
    (`matched_through`, cutoff], still listed and matching now, newest first. The cutoff is the
    last sync (`ingest_sync.synced_at`, or now) minus 30 minutes, since a lot first seen just
@@ -176,7 +188,7 @@ however many serve requests. One run:
    through an update. A lot matching several searches is listed once, under the first, naming
    the others; each search lists 10 lots and links to the rest. One inbox entry, one email,
    nothing at all when nothing is new.
-4. Sends every email that is due (`outbox.flush`), from this run or an earlier failure.
+5. Sends every email that is due (`outbox.flush`), from this run or an earlier failure.
 
 Each dealer's inbox entries, state and email are committed together; a failure is logged,
 holds up nobody else, and leaves that dealer's alerts to the next run. Emails are in the
