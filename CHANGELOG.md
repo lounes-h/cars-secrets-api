@@ -1,3 +1,13 @@
+## [0.7.0](https://github.com/lounes-h/cars-secrets-api/compare/v0.6.0...v0.7.0) (2026-10-10)
+
+### Features
+
+* alert dealers when a saved lot that may not have sold is relisted ([7fda872](https://github.com/lounes-h/cars-secrets-api/commit/7fda8722cfb44b8f7244746fbe24017494bb2f38))
+
+### Bug fixes
+
+* give a moved auction's new start once in a reminder email ([b471490](https://github.com/lounes-h/cars-secrets-api/commit/b4714904ec888f5caaa0030687ee58d13f45076b))
+
 ## [0.6.0](https://github.com/lounes-h/cars-secrets-api/compare/v0.5.0...v0.6.0) (2026-10-09)
 
 ### Features
