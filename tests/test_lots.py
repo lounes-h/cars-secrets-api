@@ -236,13 +236,16 @@ def listed(client, **params) -> list[str]:
 def test_list_filters_match_any_of_their_values(client, conn):
     insert_lot(conn, "1", title_state="CA", title_type="CQ", runs_drives="RUN & DRIVE VERIFIED",
                has_keys="YES", sale_status="PURE SALE", damage_primary="FRONT END",
-               damage_secondary="SIDE", location_state="CA", vehicle_type="V", engine="2.0L 4")
+               damage_secondary="SIDE", location_state="CA", vehicle_type="V", engine="2.0L 4",
+               cylinders="4", transmission="AUTOMATIC", drive="FRONT WHEEL DRIVE")
     insert_lot(conn, "2", title_state="ca ", title_type=" as", runs_drives="VEHICLE STARTS",
                has_keys="NO", sale_status="ON MINIMUM BID", damage_primary="REAR END",
                location_state="TX", vehicle_type="K", offsite_city="ALLENTOWN",
-               engine=" 2.0l  4")
+               engine="2L  4", cylinders="4", transmission="manual ",
+               drive="4x4 w/Rear Wheel Drv")
     insert_lot(conn, "3", title_state="CA", title_type="AN", runs_drives="DEFAULT",
-               has_keys="EXM", sale_status="ON APPROVAL", damage_primary="HAIL")
+               has_keys="EXM", sale_status="ON APPROVAL", damage_primary="HAIL", engine="2.5L 4",
+               cylinders="U", drive="Front-wheel Drive")
     insert_lot(conn, "4", title_state="ZZ", title_type="??", runs_drives=None, source="iaai")
 
     assert listed(client, title="clean") == ["1"]
@@ -255,7 +258,10 @@ def test_list_filters_match_any_of_their_values(client, conn):
     assert listed(client, sale_type=["minimum", "approval"]) == ["2", "3"]
     assert listed(client, damage=["FRONT END", "HAIL"]) == ["1", "3"]
     assert listed(client, damage2="SIDE") == ["1"]
-    assert listed(client, engine="2.0L 4") == ["1", "2"]  # Copart's spacing and case aside
+    assert listed(client, engine="2.0L") == ["1", "2"]  # the size, however Copart writes it
+    assert listed(client, cylinders="4") == ["1", "2"]
+    assert listed(client, transmission="manual") == ["2"]
+    assert listed(client, drive=["fwd", "4wd"]) == ["1", "2", "3"]
     assert listed(client, state="TX") == ["2"]
     assert listed(client, vehicle_type=["V", "K"]) == ["1", "2"]
     assert listed(client, location="offsite") == ["2"]
@@ -408,12 +414,13 @@ def test_counts_of_every_filter(client, conn):
     insert_lot(conn, "1", title_state="CA", title_type="CQ", has_keys="YES", make="TOYOTA",
                model_group="CAMRY", sale_status="PURE SALE", buy_it_now_price=3000,
                sale_at=None, sale_date=None, location_state="CA", vehicle_type="V",
-               engine="2.5L 4")
+               engine="2.5L 4", cylinders="4", transmission="AUTOMATIC", drive="ALL WHEEL DRIVE")
     insert_lot(conn, "2", title_state="CA", title_type="AS", has_keys="NO", make="TOYOTA",
                model_group="RAV4", sale_at="2026-10-03T15:00Z", location_state="CA",
-               vehicle_type="V", offsite_address="645 W UNION ST")
+               vehicle_type="V", offsite_address="645 W UNION ST", engine="ELECTRIC")
     insert_lot(conn, "3", title_state="CA", title_type="AS", has_keys=None, make="HONDA",
-               model_group="CIVIC", sale_at="2026-10-06T15:00Z", location_state="TX")
+               model_group="CIVIC", sale_at="2026-10-06T15:00Z", location_state="TX",
+               engine="1.3L R", cylinders="R", transmission="NONE", drive="4X2")
 
     response = client.get("/api/lots/counts", params={"facets": list(Counted.__args__)})
     counts = {name: [(v["value"], v["count"]) for v in values]
@@ -422,7 +429,10 @@ def test_counts_of_every_filter(client, conn):
     assert counts["title"] == [("salvage", 2), ("clean", 1)]
     assert counts["keys"] == [("no", 1), ("yes", 1)]  # no stated keys is no option
     assert counts["make"] == [("TOYOTA", 2), ("HONDA", 1)]
-    assert counts["engine"] == [("2.5L 4", 1)]  # no stated engine is no option
+    assert counts["engine"] == [("1.3L", 1), ("2.5L", 1)]  # no stated size is no option
+    assert counts["cylinders"] == [("4", 1)]  # nor is a rotary
+    assert counts["transmission"] == [("automatic", 1)]
+    assert counts["drive"] == [("awd", 1)]  # 4X2 is none of the four
     assert "model" not in counts  # models are listed only within a make
     assert counts["sale_type"] == [("pure", 1)]
     assert counts["buy_now"] == [("yes", 1)]
