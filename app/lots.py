@@ -188,6 +188,8 @@ FACETS = {
               WHEN 'VEHICLE STARTS' THEN 'starts' ELSE 'unverified' END""",
     "damage": "damage_primary",
     "damage2": "damage_secondary",
+    # Copart writes the same engine "2.0L 4" and "2.0L  4".
+    "engine": "upper(regexp_replace(trim(engine), ' +', ' ', 'g'))",
     "keys": """CASE upper(trim(has_keys)) WHEN 'YES' THEN 'yes' WHEN 'NO' THEN 'no'
                WHEN 'EXM' THEN 'exempt' END""",
     "sale_type": """CASE upper(trim(sale_status)) WHEN 'PURE SALE' THEN 'pure'
@@ -226,8 +228,8 @@ SORTS = {name: f"{CARS_FIRST}, {order}" for name, order in {
 Codes = Annotated[list[str], Field(max_length=50)]
 Amount = Annotated[int | None, Field(ge=0)]
 Counted = Literal[
-    "source", "title", "run", "damage", "damage2", "keys", "sale_type", "vehicle_type", "state",
-    "location", "make", "model", "sale", "buy_now",
+    "source", "title", "run", "damage", "damage2", "engine", "keys", "sale_type", "vehicle_type",
+    "state", "location", "make", "model", "sale", "buy_now",
 ]
 
 
@@ -241,6 +243,7 @@ class LotFilters(BaseModel):
     run: list[Literal["verified", "starts", "unverified"]] = []
     damage: Codes = []
     damage2: Codes = []
+    engine: Codes = []
     keys: list[Literal["yes", "no", "exempt"]] = []
     sale_type: list[Literal["pure", "minimum", "approval"]] = []
     buy_now: bool = False
@@ -312,7 +315,7 @@ def lot_filters(f: LotFilters,
         conds[f"q{i}"] = f"""(lot_number = %(w{i})s OR vin = upper(%(w{i})s)
             OR make ILIKE %(w{i}_prefix)s OR model_group ILIKE %(w{i}_prefix)s
             OR {DESCRIPTION} ILIKE %(w{i}_any)s)"""
-    for name in ("source", "title", "run", "damage", "damage2", "keys", "sale_type",
+    for name in ("source", "title", "run", "damage", "damage2", "engine", "keys", "sale_type",
                  "vehicle_type", "state", "location"):
         if values := getattr(f, name):
             conds[name] = f"f_{name} = ANY(%({name})s)"
