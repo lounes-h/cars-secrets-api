@@ -188,6 +188,19 @@ FACETS = {
               WHEN 'VEHICLE STARTS' THEN 'starts' ELSE 'unverified' END""",
     "damage": "damage_primary",
     "damage2": "damage_secondary",
+    # The engine's size: "2.0L 4", "2L 4" and "2 L 4" are all "2.0L". No regex: it took a scan
+    # of 150k lots from ~40 to ~330 ms.
+    "engine": """CASE WHEN strpos(engine, 'L') > 0
+                 AND pg_input_is_valid(trim(split_part(engine, 'L', 1)), 'numeric')
+                 THEN round(trim(split_part(engine, 'L', 1))::numeric, 1) || 'L' END""",
+    # Digits only: Copart also writes "U" (unknown) and "R" (rotary).
+    "cylinders": "CASE WHEN cylinders ~ '^[0-9]+$' THEN cylinders END",
+    "transmission": """CASE upper(trim(transmission)) WHEN 'AUTOMATIC' THEN 'automatic'
+                       WHEN 'MANUAL' THEN 'manual' END""",
+    # As the web's driveType groups Copart's wordings ("4X4 W/REAR WHEEL DRV", "Front-wheel Drive").
+    "drive": r"""CASE WHEN drive ~* '^\s*(4x4|four by four)' THEN '4wd'
+                 WHEN drive ~* '^\s*all' THEN 'awd' WHEN drive ~* '^\s*front' THEN 'fwd'
+                 WHEN drive ~* '^\s*rear' THEN 'rwd' END""",
     "keys": """CASE upper(trim(has_keys)) WHEN 'YES' THEN 'yes' WHEN 'NO' THEN 'no'
                WHEN 'EXM' THEN 'exempt' END""",
     "sale_type": """CASE upper(trim(sale_status)) WHEN 'PURE SALE' THEN 'pure'
@@ -226,8 +239,8 @@ SORTS = {name: f"{CARS_FIRST}, {order}" for name, order in {
 Codes = Annotated[list[str], Field(max_length=50)]
 Amount = Annotated[int | None, Field(ge=0)]
 Counted = Literal[
-    "source", "title", "run", "damage", "damage2", "keys", "sale_type", "vehicle_type", "state",
-    "location", "make", "model", "sale", "buy_now",
+    "source", "title", "run", "damage", "damage2", "engine", "cylinders", "transmission", "drive",
+    "keys", "sale_type", "vehicle_type", "state", "location", "make", "model", "sale", "buy_now",
 ]
 
 
@@ -241,6 +254,10 @@ class LotFilters(BaseModel):
     run: list[Literal["verified", "starts", "unverified"]] = []
     damage: Codes = []
     damage2: Codes = []
+    engine: Codes = []
+    cylinders: Codes = []
+    transmission: list[Literal["automatic", "manual"]] = []
+    drive: list[Literal["fwd", "rwd", "awd", "4wd"]] = []
     keys: list[Literal["yes", "no", "exempt"]] = []
     sale_type: list[Literal["pure", "minimum", "approval"]] = []
     buy_now: bool = False
@@ -312,8 +329,8 @@ def lot_filters(f: LotFilters,
         conds[f"q{i}"] = f"""(lot_number = %(w{i})s OR vin = upper(%(w{i})s)
             OR make ILIKE %(w{i}_prefix)s OR model_group ILIKE %(w{i}_prefix)s
             OR {DESCRIPTION} ILIKE %(w{i}_any)s)"""
-    for name in ("source", "title", "run", "damage", "damage2", "keys", "sale_type",
-                 "vehicle_type", "state", "location"):
+    for name in ("source", "title", "run", "damage", "damage2", "engine", "cylinders",
+                 "transmission", "drive", "keys", "sale_type", "vehicle_type", "state", "location"):
         if values := getattr(f, name):
             conds[name] = f"f_{name} = ANY(%({name})s)"
             params[name] = list(values)
