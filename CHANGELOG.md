@@ -1,3 +1,10 @@
+## [0.8.0](https://github.com/lounes-h/cars-secrets-api/compare/v0.7.0...v0.8.0) (2026-10-17)
+
+### Features
+
+* add engine lot filter ([a2347d9](https://github.com/lounes-h/cars-secrets-api/commit/a2347d96b247d6a32780c434e8b8791fd1f6e6e9))
+* filter lots by engine size, cylinders, transmission and drive ([8537b5b](https://github.com/lounes-h/cars-secrets-api/commit/8537b5bd2472f69c90ba9915316d2b34bb0e7d19))
+
 ## [0.7.0](https://github.com/lounes-h/cars-secrets-api/compare/v0.6.0...v0.7.0) (2026-10-10)
 
 ### Features
